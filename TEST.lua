@@ -7,13 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 local TeleportService = game:GetService("TeleportService")
 
--- ▼▼▼ RAINBOW MODE: change ONLY this one character ▼▼▼
--- "A" = frame border only
--- "B" = frame + reopen circle + fly panel
--- "C" = frame + rainbow strip under header
-local RAINBOW_MODE = "C"
 local RAINBOW_SPEED = 0.25
--- ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -61,6 +55,7 @@ local lastGunScan = 0
 local GUN_SCAN_INTERVAL = 0.5
 local lastAutoGunTP = 0
 local currentLayoutOrder = 0
+local currentParent = nil
 
 local function sendNotification(title, text)
     pcall(function() StarterGui:SetCore("SendNotification", {Title=title, Text=text, Duration=5}) end)
@@ -85,8 +80,8 @@ U.gui.Parent = playerGui
 
 U.frame = Instance.new("Frame")
 U.frame.Name = "Main"
-U.frame.Size = UDim2.fromOffset(280, 330)
-U.frame.Position = UDim2.new(0.5, -140, 0.5, -165)
+U.frame.Size = UDim2.fromOffset(460, 380)
+U.frame.Position = UDim2.new(0.5, -230, 0.5, -190)
 U.frame.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 U.frame.BorderSizePixel = 0
 U.frame.Active = true
@@ -113,13 +108,24 @@ U.title.Size = UDim2.new(1, -120, 1, 0)
 U.title.Position = UDim2.fromOffset(10, 0)
 U.title.BackgroundTransparency = 1
 U.title.Text = "MM2 MENU BY ARBUZ v0.9"
-U.title.TextColor3 = Color3.fromRGB(245, 245, 250)
-U.title.TextSize = 12
+U.title.TextColor3 = Color3.fromRGB(255, 255, 255)
+U.title.TextSize = 13
 U.title.Font = Enum.Font.GothamBold
 U.title.TextXAlignment = Enum.TextXAlignment.Left
 U.title.TextYAlignment = Enum.TextYAlignment.Center
 U.title.ZIndex = 2
 U.title.Parent = U.header
+
+U.titleGradient = Instance.new("UIGradient")
+U.titleGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 90, 90)),
+    ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 220, 90)),
+    ColorSequenceKeypoint.new(0.4, Color3.fromRGB(90, 255, 120)),
+    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(90, 200, 255)),
+    ColorSequenceKeypoint.new(0.8, Color3.fromRGB(210, 110, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 90, 90)),
+})
+U.titleGradient.Parent = U.title
 
 U.close = Instance.new("TextButton")
 U.close.Size = UDim2.fromOffset(30, 30)
@@ -195,30 +201,141 @@ do
     U.reopenStroke.Parent = U.reopen
 end
 
-U.content = Instance.new("ScrollingFrame")
-U.content.Size = UDim2.new(1, -20, 1, -58)
-U.content.Position = UDim2.fromOffset(10, 53)
-U.content.BackgroundTransparency = 1
-U.content.BorderSizePixel = 0
-U.content.ScrollBarThickness = 5
-U.content.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
-U.content.AutomaticCanvasSize = Enum.AutomaticSize.Y
-U.content.ScrollingDirection = Enum.ScrollingDirection.Y
-U.content.Parent = U.frame
+-- Sidebar (left column, tab list)
+U.sidebar = Instance.new("Frame")
+U.sidebar.Name = "Sidebar"
+U.sidebar.Size = UDim2.new(0, 100, 1, -66)
+U.sidebar.Position = UDim2.fromOffset(10, 55)
+U.sidebar.BackgroundTransparency = 1
+U.sidebar.Parent = U.frame
 do
-    local l = Instance.new("UIListLayout") l.Padding = UDim.new(0, 6) l.SortOrder = Enum.SortOrder.LayoutOrder l.Parent = U.content
+    local l = Instance.new("UIListLayout")
+    l.Padding = UDim.new(0, 4)
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Parent = U.sidebar
 end
 
-local rainbowUnderline
-if RAINBOW_MODE == "C" then
-    rainbowUnderline = Instance.new("Frame")
-    rainbowUnderline.Size = UDim2.new(1, 0, 0, 2)
-    rainbowUnderline.Position = UDim2.new(0, 0, 0, 48)
-    rainbowUnderline.BorderSizePixel = 0
-    rainbowUnderline.ZIndex = 3
-    rainbowUnderline.Parent = U.frame
+-- Right area (search + tab content)
+U.rightArea = Instance.new("Frame")
+U.rightArea.Name = "RightArea"
+U.rightArea.Size = UDim2.new(1, -128, 1, -66)
+U.rightArea.Position = UDim2.fromOffset(118, 55)
+U.rightArea.BackgroundTransparency = 1
+U.rightArea.Parent = U.frame
+
+U.searchBox = Instance.new("TextBox")
+U.searchBox.Size = UDim2.new(1, 0, 0, 28)
+U.searchBox.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+U.searchBox.BorderSizePixel = 0
+U.searchBox.Text = ""
+U.searchBox.PlaceholderText = "Search..."
+U.searchBox.TextColor3 = Color3.fromRGB(230, 230, 235)
+U.searchBox.PlaceholderColor3 = Color3.fromRGB(120, 122, 130)
+U.searchBox.TextSize = 12
+U.searchBox.Font = Enum.Font.GothamSemibold
+U.searchBox.ClearTextOnFocus = false
+U.searchBox.TextXAlignment = Enum.TextXAlignment.Left
+U.searchBox.Parent = U.rightArea
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.searchBox
+    local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 8) p.Parent = U.searchBox
 end
 
+U.tabFrames = {}
+U.tabs = {}
+local tabNames = {"Movement", "Role ESP", "Item ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Utility"}
+
+for _, tabName in ipairs(tabNames) do
+    local fr = Instance.new("ScrollingFrame")
+    fr.Name = tabName .. "Tab"
+    fr.Size = UDim2.new(1, 0, 1, -36)
+    fr.Position = UDim2.fromOffset(0, 34)
+    fr.BackgroundTransparency = 1
+    fr.BorderSizePixel = 0
+    fr.ScrollBarThickness = 5
+    fr.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
+    fr.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    fr.ScrollingDirection = Enum.ScrollingDirection.Y
+    fr.Visible = false
+    fr.Parent = U.rightArea
+    do
+        local l = Instance.new("UIListLayout")
+        l.Padding = UDim.new(0, 6)
+        l.SortOrder = Enum.SortOrder.LayoutOrder
+        l.Parent = fr
+    end
+    U.tabFrames[tabName] = fr
+end
+
+U.activeTab = nil
+local function switchTab(name)
+    U.activeTab = name
+    for k, fr in pairs(U.tabFrames) do
+        fr.Visible = (k == name)
+    end
+    for k, btn in pairs(U.tabs) do
+        if k == name then
+            btn.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+            btn.TextColor3 = Color3.fromRGB(200, 200, 210)
+        end
+    end
+    if U.searchBox.Text ~= "" then
+        U.searchBox.Text = ""
+    end
+    local fr = U.tabFrames[name]
+    if fr then
+        for _, child in ipairs(fr:GetChildren()) do
+            if child:IsA("TextButton") then child.Visible = true end
+        end
+    end
+end
+
+local iOrder = 0
+for _, tabName in ipairs(tabNames) do
+    iOrder = iOrder + 1
+    local tb = Instance.new("TextButton")
+    tb.Size = UDim2.new(1, 0, 0, 32)
+    tb.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+    tb.BorderSizePixel = 0
+    tb.Text = tabName
+    tb.TextColor3 = Color3.fromRGB(200, 200, 210)
+    tb.TextSize = 11
+    tb.Font = Enum.Font.GothamSemibold
+    tb.AutoButtonColor = false
+    tb.TextXAlignment = Enum.TextXAlignment.Left
+    tb.LayoutOrder = iOrder
+    tb.Parent = U.sidebar
+    do
+        local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = tb
+        local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 8) p.Parent = tb
+    end
+    U.tabs[tabName] = tb
+    tb.MouseButton1Click:Connect(function() switchTab(tabName) end)
+end
+
+switchTab("Movement")
+
+U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local q = U.searchBox.Text:lower()
+    local fr = U.tabFrames[U.activeTab]
+    if not fr then return end
+    for _, child in ipairs(fr:GetChildren()) do
+        if child:IsA("TextButton") then
+            if q == "" then
+                child.Visible = true
+            else
+                child.Visible = child.Text:lower():find(q, 1, true) ~= nil
+            end
+        end
+    end
+end)
+
+-- ============================================================
+-- HELPERS (use currentParent for placement)
+-- ============================================================
 local function createSectionTitle(text)
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(1, 0, 0, 20)
@@ -229,25 +346,25 @@ local function createSectionTitle(text)
     l.Font = Enum.Font.GothamBold
     l.TextXAlignment = Enum.TextXAlignment.Left
     l.LayoutOrder = getLayoutOrder()
-    l.Parent = U.content
+    l.Parent = currentParent
 end
 
 local function createToggle(name, text)
     local b = Instance.new("TextButton")
     b.Name = name
-    b.Size = UDim2.new(1, 0, 0, 36)
+    b.Size = UDim2.new(1, 0, 0, 34)
     b.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
     b.BorderSizePixel = 0
     b.Text = text
     b.TextColor3 = Color3.fromRGB(230, 230, 235)
-    b.TextSize = 13
+    b.TextSize = 12
     b.Font = Enum.Font.GothamSemibold
     b.AutoButtonColor = false
     b.LayoutOrder = getLayoutOrder()
-    b.Parent = U.content
+    b.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = b end
     local ind = Instance.new("Frame")
-    ind.Size = UDim2.fromOffset(5, 20)
+    ind.Size = UDim2.fromOffset(5, 18)
     ind.Position = UDim2.fromOffset(8, 8)
     ind.BackgroundColor3 = Color3.fromRGB(80, 82, 90)
     ind.BorderSizePixel = 0
@@ -259,16 +376,16 @@ end
 local function createActionButton(name, text)
     local b = Instance.new("TextButton")
     b.Name = name
-    b.Size = UDim2.new(1, 0, 0, 36)
+    b.Size = UDim2.new(1, 0, 0, 34)
     b.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
     b.BorderSizePixel = 0
     b.Text = text
     b.TextColor3 = Color3.fromRGB(230, 230, 235)
-    b.TextSize = 13
+    b.TextSize = 12
     b.Font = Enum.Font.GothamSemibold
     b.AutoButtonColor = false
     b.LayoutOrder = getLayoutOrder()
-    b.Parent = U.content
+    b.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = b end
     return b
 end
@@ -312,7 +429,11 @@ task.spawn(function()
     end
 end)
 
-createSectionTitle("MOVEMENT SETTINGS")
+-- ============================================================
+-- MOVEMENT TAB
+-- ============================================================
+currentParent = U.tabFrames.Movement
+createSectionTitle("MOVEMENT")
 
 U.noclipBtn, U.noclipInd = createToggle("Noclip", "Noclip")
 U.noclipBtn.MouseButton1Click:Connect(function()
@@ -340,7 +461,6 @@ end)
 U.flyBtn, U.flyInd = createToggle("Fly", "Fly")
 
 local FP = {}
-
 FP.panel = Instance.new("Frame")
 FP.panel.Size = UDim2.fromOffset(210, 220)
 FP.panel.Position = UDim2.new(0.5, 150, 0.5, -110)
@@ -643,7 +763,7 @@ U.shRow = Instance.new("Frame")
 U.shRow.Size = UDim2.new(1, 0, 0, 32)
 U.shRow.BackgroundTransparency = 1
 U.shRow.LayoutOrder = getLayoutOrder()
-U.shRow.Parent = U.content
+U.shRow.Parent = currentParent
 
 U.shMinus = Instance.new("TextButton")
 U.shMinus.Size = UDim2.fromOffset(36, 32)
@@ -725,7 +845,11 @@ RunService.RenderStepped:Connect(function()
     if h and h.WalkSpeed ~= S.speedhackSpeed then h.WalkSpeed = S.speedhackSpeed end
 end)
 
-createSectionTitle("ROLE ESP SETTINGS")
+-- ============================================================
+-- ROLE ESP TAB
+-- ============================================================
+currentParent = U.tabFrames["Role ESP"]
+createSectionTitle("ROLE ESP")
 
 local function makeEspBtn(role)
     local b, i = createToggle(role .. "ESP", role .. " ESP")
@@ -745,7 +869,11 @@ makeEspBtn("Murderer")
 makeEspBtn("Sheriff")
 makeEspBtn("Hero")
 
-createSectionTitle("ITEM ESP SETTINGS")
+-- ============================================================
+-- ITEM ESP TAB
+-- ============================================================
+currentParent = U.tabFrames["Item ESP"]
+createSectionTitle("ITEM ESP")
 
 U.gunBtn, U.gunInd = createToggle("GunESP", "Gun ESP")
 U.gunBtn.MouseButton1Click:Connect(function()
@@ -762,7 +890,11 @@ U.gunBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-createSectionTitle("NOTIFIER SETTINGS")
+-- ============================================================
+-- NOTIFIER TAB
+-- ============================================================
+currentParent = U.tabFrames.Notifier
+createSectionTitle("NOTIFIER")
 
 local function fmtRole(r, n)
     if not n then return r .. ": None" end
@@ -806,7 +938,11 @@ U.autoChatBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-createSectionTitle("MURDERER SETTINGS")
+-- ============================================================
+-- MURDERER TAB
+-- ============================================================
+currentParent = U.tabFrames.Murderer
+createSectionTitle("MURDERER")
 
 local function getKnife()
     local c = player.Character
@@ -877,7 +1013,11 @@ U.killSheriffBtn.MouseButton1Click:Connect(function() killByName(SheriffName) en
 U.killHeroBtn = createActionButton("KillHeroNow", "Kill Hero Now")
 U.killHeroBtn.MouseButton1Click:Connect(function() killByName(HeroName) end)
 
-createSectionTitle("SHERIFF SETTINGS")
+-- ============================================================
+-- SHERIFF TAB
+-- ============================================================
+currentParent = U.tabFrames.Sheriff
+createSectionTitle("SHERIFF")
 
 local function getGun()
     local c = player.Character
@@ -917,7 +1057,11 @@ end
 U.killMurdererBtn = createActionButton("KillMurdererNow", "Kill Murderer Now")
 U.killMurdererBtn.MouseButton1Click:Connect(shootMurderer)
 
-createSectionTitle("TELEPORT SETTINGS")
+-- ============================================================
+-- TELEPORT TAB
+-- ============================================================
+currentParent = U.tabFrames.Teleport
+createSectionTitle("TELEPORT")
 
 local function findGunPart()
     local gd = workspace:FindFirstChild("GunDrop", true) or workspace:FindFirstChild("Gun", true)
@@ -986,7 +1130,7 @@ U.playerTpBtn = createActionButton("PlayerTeleport", "Teleport To Player")
 U.killSelBtn = createActionButton("KillSelectedPlayer", "Kill Selected Player")
 
 U.pDropdown = Instance.new("TextButton")
-U.pDropdown.Size = UDim2.new(1, 0, 0, 36)
+U.pDropdown.Size = UDim2.new(1, 0, 0, 34)
 U.pDropdown.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
 U.pDropdown.BorderSizePixel = 0
 U.pDropdown.Text = "Select Player"
@@ -995,7 +1139,7 @@ U.pDropdown.TextSize = 12
 U.pDropdown.Font = Enum.Font.GothamSemibold
 U.pDropdown.AutoButtonColor = false
 U.pDropdown.LayoutOrder = getLayoutOrder()
-U.pDropdown.Parent = U.content
+U.pDropdown.Parent = currentParent
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.pDropdown end
 
 U.pList = Instance.new("ScrollingFrame")
@@ -1009,7 +1153,7 @@ U.pList.ScrollingDirection = Enum.ScrollingDirection.Y
 U.pList.ScrollBarThickness = 5
 U.pList.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
 U.pList.LayoutOrder = getLayoutOrder()
-U.pList.Parent = U.content
+U.pList.Parent = currentParent
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.pList
     local l = Instance.new("UIListLayout") l.Padding = UDim.new(0, 2) l.SortOrder = Enum.SortOrder.Name l.Parent = U.pList
@@ -1095,7 +1239,11 @@ U.tpSheriffBtn.MouseButton1Click:Connect(function() tpByName(SheriffName) end)
 U.tpHeroBtn = createActionButton("TeleportHero", "Teleport To Hero")
 U.tpHeroBtn.MouseButton1Click:Connect(function() tpByName(HeroName) end)
 
-createSectionTitle("UTILITY SETTINGS")
+-- ============================================================
+-- UTILITY TAB
+-- ============================================================
+currentParent = U.tabFrames.Utility
+createSectionTitle("UTILITY")
 
 U.avBtn, U.avInd = createToggle("AntiVoid", "Anti Fall Down (Void)")
 U.avBtn.MouseButton1Click:Connect(function()
@@ -1165,19 +1313,22 @@ local function resetAllToggles()
 end
 
 U.turnOffBtn = Instance.new("TextButton")
-U.turnOffBtn.Size = UDim2.new(1, 0, 0, 36)
+U.turnOffBtn.Size = UDim2.new(1, 0, 0, 34)
 U.turnOffBtn.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
 U.turnOffBtn.BorderSizePixel = 0
 U.turnOffBtn.Text = "TURN OFF ALL"
 U.turnOffBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
-U.turnOffBtn.TextSize = 13
+U.turnOffBtn.TextSize = 12
 U.turnOffBtn.Font = Enum.Font.GothamBold
 U.turnOffBtn.AutoButtonColor = false
 U.turnOffBtn.LayoutOrder = getLayoutOrder()
-U.turnOffBtn.Parent = U.content
+U.turnOffBtn.Parent = currentParent
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.turnOffBtn end
 U.turnOffBtn.MouseButton1Click:Connect(resetAllToggles)
 
+-- ============================================================
+-- ESP SYSTEM
+-- ============================================================
 local function mkHL(t)
     if t == player or not t.Character then return end
     local h = t.Character:FindFirstChild("RoleESP")
@@ -1564,7 +1715,7 @@ UserInputService.InputChanged:Connect(function(i)
     if not S.resizing then return end
     if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
         local d = i.Position - resizeStart
-        U.frame.Size = UDim2.fromOffset(math.max(240, resizeStartSize.X + d.X), math.max(200, resizeStartSize.Y + d.Y))
+        U.frame.Size = UDim2.fromOffset(math.max(380, resizeStartSize.X + d.X), math.max(280, resizeStartSize.Y + d.Y))
     end
 end)
 
@@ -1634,12 +1785,9 @@ RunService.Heartbeat:Connect(function()
     local hue = (tick() * RAINBOW_SPEED) % 1
     local color = Color3.fromHSV(hue, 1, 1)
     U.frameStroke.Color = color
-    if RAINBOW_MODE == "B" then
-        U.reopenStroke.Color = color
-        FP.stroke.Color = color
-    elseif RAINBOW_MODE == "C" then
-        if rainbowUnderline then rainbowUnderline.BackgroundColor3 = color end
-    end
+    U.reopenStroke.Color = color
+    FP.stroke.Color = color
+    U.titleGradient.Rotation = (tick() * 60) % 360
 end)
 
 getRoles()
