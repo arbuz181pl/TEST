@@ -7,6 +7,14 @@ local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 local TeleportService = game:GetService("TeleportService")
 
+-- ▼▼▼ RAINBOW MODE: change ONLY this one character ▼▼▼
+-- "A" = frame border only
+-- "B" = frame + reopen circle + fly panel
+-- "C" = frame + rainbow strip under header
+local RAINBOW_MODE = "B"
+local RAINBOW_SPEED = 0.25
+-- ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -85,7 +93,10 @@ U.frame.Active = true
 U.frame.Parent = U.gui
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = U.frame
-    local s = Instance.new("UIStroke") s.Color = Color3.fromRGB(55, 57, 65) s.Thickness = 1 s.Parent = U.frame
+    U.frameStroke = Instance.new("UIStroke")
+    U.frameStroke.Color = Color3.fromRGB(55, 57, 65)
+    U.frameStroke.Thickness = 1
+    U.frameStroke.Parent = U.frame
 end
 
 U.header = Instance.new("Frame")
@@ -178,7 +189,10 @@ U.reopen.ZIndex = 50
 U.reopen.Parent = U.gui
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(1, 0) c.Parent = U.reopen
-    local s = Instance.new("UIStroke") s.Color = Color3.fromRGB(80, 82, 90) s.Thickness = 2 s.Parent = U.reopen
+    U.reopenStroke = Instance.new("UIStroke")
+    U.reopenStroke.Color = Color3.fromRGB(80, 82, 90)
+    U.reopenStroke.Thickness = 2
+    U.reopenStroke.Parent = U.reopen
 end
 
 U.content = Instance.new("ScrollingFrame")
@@ -193,6 +207,16 @@ U.content.ScrollingDirection = Enum.ScrollingDirection.Y
 U.content.Parent = U.frame
 do
     local l = Instance.new("UIListLayout") l.Padding = UDim.new(0, 6) l.SortOrder = Enum.SortOrder.LayoutOrder l.Parent = U.content
+end
+
+local rainbowUnderline
+if RAINBOW_MODE == "C" then
+    rainbowUnderline = Instance.new("Frame")
+    rainbowUnderline.Size = UDim2.new(1, 0, 0, 2)
+    rainbowUnderline.Position = UDim2.new(0, 0, 0, 48)
+    rainbowUnderline.BorderSizePixel = 0
+    rainbowUnderline.ZIndex = 3
+    rainbowUnderline.Parent = U.frame
 end
 
 local function createSectionTitle(text)
@@ -327,7 +351,10 @@ FP.panel.ZIndex = 20
 FP.panel.Parent = U.gui
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = FP.panel
-    local s = Instance.new("UIStroke") s.Color = Color3.fromRGB(55, 57, 65) s.Thickness = 1 s.Parent = FP.panel
+    FP.stroke = Instance.new("UIStroke")
+    FP.stroke.Color = Color3.fromRGB(55, 57, 65)
+    FP.stroke.Thickness = 1
+    FP.stroke.Parent = FP.panel
 end
 
 do
@@ -1600,6 +1627,18 @@ UserInputService.InputBegan:Connect(function(i, p)
     if p then return end
     if i.KeyCode == Enum.KeyCode.RightShift then
         if S.menuVisible then minimizeMenu() else showMenu() end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    local hue = (tick() * RAINBOW_SPEED) % 1
+    local color = Color3.fromHSV(hue, 1, 1)
+    U.frameStroke.Color = color
+    if RAINBOW_MODE == "B" then
+        U.reopenStroke.Color = color
+        FP.stroke.Color = color
+    elseif RAINBOW_MODE == "C" then
+        if rainbowUnderline then rainbowUnderline.BackgroundColor3 = color end
     end
 end)
 
