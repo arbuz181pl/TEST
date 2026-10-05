@@ -11,7 +11,7 @@ local TeleportService = game:GetService("TeleportService")
 -- "A" = frame border only
 -- "B" = frame + reopen circle + fly panel
 -- "C" = frame + rainbow strip under header
-local RAINBOW_MODE = "A"
+local RAINBOW_MODE = "C"
 local RAINBOW_SPEED = 0.25
 -- ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲
 
