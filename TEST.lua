@@ -201,7 +201,6 @@ do
     U.reopenStroke.Parent = U.reopen
 end
 
--- Sidebar (left column, tab list)
 U.sidebar = Instance.new("Frame")
 U.sidebar.Name = "Sidebar"
 U.sidebar.Size = UDim2.new(0, 100, 1, -66)
@@ -215,7 +214,6 @@ do
     l.Parent = U.sidebar
 end
 
--- Right area (search + tab content)
 U.rightArea = Instance.new("Frame")
 U.rightArea.Name = "RightArea"
 U.rightArea.Size = UDim2.new(1, -128, 1, -66)
@@ -243,7 +241,7 @@ end
 
 U.tabFrames = {}
 U.tabs = {}
-local tabNames = {"Movement", "Role ESP", "Item ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Utility"}
+local tabNames = {"Movement", "ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Utility"}
 
 for _, tabName in ipairs(tabNames) do
     local fr = Instance.new("ScrollingFrame")
@@ -333,9 +331,6 @@ U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- ============================================================
--- HELPERS (use currentParent for placement)
--- ============================================================
 local function createSectionTitle(text)
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(1, 0, 0, 20)
@@ -846,9 +841,10 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
--- ROLE ESP TAB
+-- ESP TAB (role + gun merged)
 -- ============================================================
-currentParent = U.tabFrames["Role ESP"]
+currentParent = U.tabFrames.ESP
+
 createSectionTitle("ROLE ESP")
 
 local function makeEspBtn(role)
@@ -869,10 +865,6 @@ makeEspBtn("Murderer")
 makeEspBtn("Sheriff")
 makeEspBtn("Hero")
 
--- ============================================================
--- ITEM ESP TAB
--- ============================================================
-currentParent = U.tabFrames["Item ESP"]
 createSectionTitle("ITEM ESP")
 
 U.gunBtn, U.gunInd = createToggle("GunESP", "Gun ESP")
