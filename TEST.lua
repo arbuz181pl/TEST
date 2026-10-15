@@ -643,7 +643,7 @@ do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent =
 
 FP.plus = Instance.new("TextButton")
 FP.plus.Size = msz(36, 32)
-FP.plus.Position = UDim2.new(1, -mn(46), 0, 123)
+FP.plus.Position = UDim2.new(1, -mn(46), 0, mn(123))
 FP.plus.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
 FP.plus.BorderSizePixel = 0
 FP.plus.Text = "+"
@@ -671,7 +671,7 @@ do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent =
 
 FP.down = Instance.new("TextButton")
 FP.down.Size = msz(85, 32)
-FP.down.Position = UDim2.new(1, -mn(95), 0, 168)
+FP.down.Position = UDim2.new(1, -mn(95), 0, mn(168))
 FP.down.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
 FP.down.BorderSizePixel = 0
 FP.down.Text = "DOWN"
@@ -788,13 +788,19 @@ RunService.RenderStepped:Connect(function()
     local c = player.Character
     if not c then stopFly() return end
     local r = c:FindFirstChild("HumanoidRootPart")
+    local hum = c:FindFirstChildOfClass("Humanoid")
     local cam = workspace.CurrentCamera
     if not r or not cam then return end
     local dir = Vector3.zero
+    -- Keyboard input
     if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+    -- Mobile: use humanoid MoveDirection (set by touch joystick)
+    if hum and hum.MoveDirection.Magnitude > 0.05 then
+        dir = dir + hum.MoveDirection
+    end
     if UserInputService:IsKeyDown(Enum.KeyCode.Space) or flyUpFlag == 1 then dir = dir + Vector3.new(0, 1, 0) end
     if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or flyDownFlag == -1 then dir = dir - Vector3.new(0, 1, 0) end
     if dir.Magnitude > 0 then flyBV.Velocity = dir.Unit * S.flySpeed else flyBV.Velocity = Vector3.zero end
