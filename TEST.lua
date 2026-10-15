@@ -27,6 +27,16 @@ local function mn(n) return math.floor(n * MS + 0.5) end
 local function msz(x, y) return UDim2.fromOffset(mn(x), mn(y)) end
 local function mpos(x, y) return UDim2.fromOffset(mn(x), mn(y)) end
 
+-- ECST = European Central Summer Time (UTC+2). Change offset here if needed.
+local ECST_OFFSET = 2 * 3600
+local function getECSTString()
+    local ok, str = pcall(function()
+        return os.date("!%H:%M:%S", os.time() + ECST_OFFSET)
+    end)
+    if ok and str then return str end
+    return "--:--:--"
+end
+
 local S = {
     noclip = false, infinityJump = false, flingOnTouch = false, flingThirdParty = false,
     flyEnabled = false, autoNotifyRoles = false, autoKillAll = false, autoGunTP = false,
@@ -168,7 +178,7 @@ U.header.Parent = U.frame
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = U.header end
 
 U.title = Instance.new("TextLabel")
-U.title.Size = UDim2.new(1, -mn(120), 1, 0)
+U.title.Size = UDim2.new(1, -mn(235), 1, 0)
 U.title.Position = mpos(10, 0)
 U.title.BackgroundTransparency = 1
 U.title.Text = "MM2 MENU BY ARBUZ v1.2"
@@ -190,6 +200,29 @@ U.titleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 90, 90)),
 })
 U.titleGradient.Parent = U.title
+
+-- ECST timestamp label (right-aligned, small, gray)
+U.timeStamp = Instance.new("TextLabel")
+U.timeStamp.Size = mpos(115, 48)
+U.timeStamp.Position = UDim2.new(1, -mn(220), 0, 0)
+U.timeStamp.BackgroundTransparency = 1
+U.timeStamp.Text = "--:--:-- ECST"
+U.timeStamp.TextColor3 = Color3.fromRGB(170, 172, 180)
+U.timeStamp.TextSize = mn(10)
+U.timeStamp.Font = Enum.Font.GothamMedium
+U.timeStamp.TextXAlignment = Enum.TextXAlignment.Right
+U.timeStamp.TextYAlignment = Enum.TextYAlignment.Center
+U.timeStamp.ZIndex = 3
+U.timeStamp.Parent = U.header
+
+task.spawn(function()
+    while U.gui.Parent do
+        pcall(function()
+            U.timeStamp.Text = getECSTString() .. " ECST"
+        end)
+        task.wait(1)
+    end
+end)
 
 U.close = Instance.new("TextButton")
 U.close.Size = msz(30, 30)
