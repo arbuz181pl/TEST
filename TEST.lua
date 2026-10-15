@@ -1,4 +1,4 @@
---// MM2 MENU BY ARBUZ v1.2.1
+--// MM2 MENU BY ARBUZ v1.3.0
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,78 +8,55 @@ local StarterGui = game:GetService("StarterGui")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local LocalizationService = game:GetService("LocalizationService")
+local TweenService = game:GetService("TweenService")
+local Stats = game:GetService("Stats")
 
 local RAINBOW_SPEED = 0.25
 local ALARM_TIME_COOLDOWN = 6
 local ALARM_DIST_STEP = 5
-local SCRIPT_VERSION = "v1.2.1"
+local SCRIPT_VERSION = "v1.3.0"
 local SCRIPT_AUTHOR = "Arbuz"
 
 -- ═══════════════════════════════════════════════════════════
--- CHANGELOG - add new entries at the TOP
+-- CHANGELOG (only newest shown in What's New)
 -- ═══════════════════════════════════════════════════════════
 local CHANGELOG = {
+    {
+        version = "v1.3.0",
+        date = "2026-10-16",
+        changes = {
+            "Home: FPS + ping display with on-screen toggle",
+            "Home: Live distance to murderer",
+            "Home: Cross-tab search (searches every tab)",
+            "Home: Copy any notification text by clicking it",
+            "Notifier: Re-announce roles every 30s toggle",
+            "Notifier: Detect new hero and notify",
+            "Notifier: Auto-hide UI when round starts",
+            "Utility: Proximity direction arrow to murderer",
+            "Utility: Silent panic keybind (default End)",
+            "Config: 3 saved config slots (renameable)",
+            "Settings: Compact mode toggle",
+            "Sidebar: Hold tab 3s to reorder (rainbow animation)",
+            "New custom notification design (icons + colors)",
+            "Tooltips on hover/long-press",
+            "First-time interactive tutorial (skippable)",
+            "Resize handle now shows ◢ icon",
+            "Close script now asks for confirmation",
+            "What's New only shows the latest version",
+            "Auto-rejoin on kick (uses hookmetamethod)",
+        },
+    },
     {
         version = "v1.2.1",
         date = "2026-10-16",
         changes = {
-            "Added Home tab (first tab) with live status card",
-            "Added What's New modal with full changelog",
-            "Added session stats tracking (kills, deaths, rounds, roles)",
-            "Added notification history (last 10)",
-            "Added Active Keybinds quick reference on Home",
-            "Added Script Info + Server Info cards on Home",
-            "Added Copy Loadstring button",
-            "Added Panic button (off everything + minimize)",
-            "Moved Turn Off All / PVP Ready / Restore to Home tab",
-            "Fixed mobile crosshair notification text",
-            "Fixed auto chat sending your own name (shows self-notify instead)",
-            "Slowed killer alarm (6s cooldown, 5-stud step)",
-            "Added Menu Sound + Kill Sound volume sliders",
-            "Reduced whitespace across all tabs",
-        },
-    },
-    {
-        version = "v1.2",
-        date = "2026-10-16",
-        changes = {
-            "Mobile-responsive UI scaling (0.68x on mobile)",
-            "Fixed fly movement on mobile (touch joystick support)",
-            "Fixed fly panel +/DOWN button alignment on mobile",
-            "Custom crosshair now follows finger (multi-touch aware)",
-            "Role notify delay (2.5s) prevents split notifications",
-            "Fixed own username not showing when you are Sheriff",
-            "Disabled crosshair on mobile with helpful message",
-            "Added sound volume sliders in Settings",
-            "Killer alarm 6s cooldown + 5-stud step",
-            "Added Restore Before PVP button",
-            "Added Enable All Notifications button",
-        },
-    },
-    {
-        version = "v1.1",
-        date = "2026-10-15",
-        changes = {
-            "Added PVP Ready preset",
-            "Added role trails (Killer / Sheriff / Hero)",
-            "Added Camera Follow Murderer",
-            "Added keybind system",
-            "Added Menu Opacity slider",
-        },
-    },
-    {
-        version = "v1.0",
-        date = "2026-10-15",
-        changes = {
-            "Initial release",
-            "Movement: Noclip, Fly, Speedhack, Infinity Jump, Fling",
-            "ESP: Role ESP, Gun ESP, Player distance",
-            "Notifier: Auto roles, round events, chat announcements",
-            "Murderer: Kill all, kill sheriff/hero",
-            "Sheriff: Shoot murderer",
-            "Teleport: Player, role, world teleports",
-            "Utility: Anti void/fling/afk, killer alarm, crosshair",
-            "Server: Rejoin, Server hop",
+            "Added Home tab with live status + stats",
+            "Added What's New modal",
+            "Session stats tracking",
+            "Notification history",
+            "Active keybind quick reference",
+            "Copy loadstring button",
+            "Panic button",
         },
     },
 }
@@ -153,7 +130,6 @@ local S = {
     reopenDragDist = 0,
     hopping = false,
     pvpSnapshot = nil,
-    -- Home tab additions
     sessionStart = tick(),
     notificationHistory = {},
     stats = { kills = 0, deaths = 0, rounds = 0, asMurderer = 0, asSheriff = 0 },
@@ -161,11 +137,28 @@ local S = {
     statsCountedSheriff = false,
     whatsNewAutoShown = false,
     homeRebuildDirty = true,
+    -- v1.3.0 additions
+    reAnnounceEnabled = false,
+    reAnnounceInterval = 30,
+    lastReAnnounceTime = 0,
+    lastHero = nil,
+    heroChangeNotify = false,
+    autoHideInRound = false,
+    dirIndicatorOn = false,
+    compactMode = false,
+    fpsOverlayOn = false,
+    currentFPS = 60,
+    currentPing = 0,
+    savedConfigs = {nil, nil, nil},
+    lastAlarmDir = nil,
+    tabOrder = {"Home", "Movement", "ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Keybinds", "Settings", "Utility", "Config"},
+    tabReorderState = {active = false, tab = nil, holdThread = nil, startY = 0},
+    tutorialShown = false,
     keybinds = {
         fly = Enum.KeyCode.LeftAlt, noclip = Enum.KeyCode.N, speedhack = Enum.KeyCode.Q,
         infinityJump = Enum.KeyCode.J, autoKillAll = Enum.KeyCode.K, gunESP = Enum.KeyCode.G,
         murdererESP = Enum.KeyCode.M, sheriffESP = Enum.KeyCode.H, innocentESP = Enum.KeyCode.I,
-        antiVoid = Enum.KeyCode.B, turnOffAll = Enum.KeyCode.Y,
+        antiVoid = Enum.KeyCode.B, turnOffAll = Enum.KeyCode.Y, panic = Enum.KeyCode.End,
     },
     keybindList = {
         {id = "fly", name = "Toggle Fly"}, {id = "noclip", name = "Toggle Noclip"},
@@ -173,7 +166,7 @@ local S = {
         {id = "autoKillAll", name = "Toggle Auto Kill All"}, {id = "gunESP", name = "Toggle Gun ESP"},
         {id = "murdererESP", name = "Toggle Murderer ESP"}, {id = "sheriffESP", name = "Toggle Sheriff ESP"},
         {id = "innocentESP", name = "Toggle Innocent ESP"}, {id = "antiVoid", name = "Toggle Anti Void"},
-        {id = "turnOffAll", name = "Turn Off All"},
+        {id = "turnOffAll", name = "Turn Off All"}, {id = "panic", name = "Panic (silent off + minimize)"},
     },
 }
 
@@ -206,13 +199,205 @@ local lastAutoGunTP = 0
 local currentLayoutOrder = 0
 local currentParent = nil
 
--- Forward declarations
 local resetAllToggles
 local applyPvpPreset
 local restorePvpSnapshot
 local minimizeMenu
 local showMenu
 local openWhatsNew
+local showTutorial
+local showCloseConfirm
+local updateHomeUI
+local rebuildKeybindList
+local rebuildNotifHistory
+
+-- ═══════════════════════════════════════════════════════════
+-- CUSTOM NOTIFICATION SYSTEM
+-- ═══════════════════════════════════════════════════════════
+local NOTIF_COLORS = {
+    info = Color3.fromRGB(70, 140, 220),
+    success = Color3.fromRGB(70, 200, 110),
+    warn = Color3.fromRGB(230, 180, 60),
+    alert = Color3.fromRGB(230, 70, 70),
+    round = Color3.fromRGB(180, 110, 230),
+}
+local NOTIF_ICONS = {
+    info = "ℹ", success = "✓", warn = "⚠", alert = "✕", round = "◉",
+}
+
+local NotifUI = {}
+NotifUI.gui = Instance.new("ScreenGui")
+NotifUI.gui.Name = "MM2Notifs"
+NotifUI.gui.ResetOnSpawn = false
+NotifUI.gui.DisplayOrder = 300
+NotifUI.gui.IgnoreGuiInset = true
+NotifUI.gui.Parent = playerGui
+
+NotifUI.container = Instance.new("Frame")
+NotifUI.container.Size = UDim2.new(0, mn(260), 1, 0)
+NotifUI.container.Position = UDim2.new(1, -mn(268), 0, mn(12))
+NotifUI.container.BackgroundTransparency = 1
+NotifUI.container.Parent = NotifUI.gui
+do
+    local l = Instance.new("UIListLayout")
+    l.Padding = UDim.new(0, 6)
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    l.VerticalAlignment = Enum.VerticalAlignment.Top
+    l.Parent = NotifUI.container
+end
+
+local notifIdCounter = 0
+
+local function inferCategory(soundId)
+    if soundId == SOUNDS.alert then return "alert" end
+    if soundId == SOUNDS.success then return "success" end
+    if soundId == SOUNDS.round then return "round" end
+    return "info"
+end
+
+local function pushCustomNotification(title, text, category)
+    category = category or "info"
+    local color = NOTIF_COLORS[category] or NOTIF_COLORS.info
+    local icon = NOTIF_ICONS[category] or "•"
+
+    notifIdCounter = notifIdCounter + 1
+    local id = notifIdCounter
+
+    local frame = Instance.new("Frame")
+    frame.Name = "Notif_" .. id
+    frame.Size = UDim2.new(1, 0, 0, mn(52))
+    frame.BackgroundColor3 = Color3.fromRGB(30, 32, 40)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = id
+    frame.Position = UDim2.new(1, mn(280), 0, 0)
+    frame.Parent = NotifUI.container
+    do
+        local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = frame
+        local st = Instance.new("UIStroke")
+        st.Color = Color3.fromRGB(55, 58, 70)
+        st.Thickness = 1
+        st.Parent = frame
+    end
+
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(0, mn(4), 1, 0)
+    accent.BackgroundColor3 = color
+    accent.BorderSizePixel = 0
+    accent.Parent = frame
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = accent end
+
+    local iconFrame = Instance.new("Frame")
+    iconFrame.Size = msz(24, 24)
+    iconFrame.Position = mpos(12, 14)
+    iconFrame.BackgroundColor3 = color
+    iconFrame.BackgroundTransparency = 0.75
+    iconFrame.BorderSizePixel = 0
+    iconFrame.Parent = frame
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(1, 0) c.Parent = iconFrame end
+
+    local iconLbl = Instance.new("TextLabel")
+    iconLbl.Size = UDim2.new(1, 0, 1, 0)
+    iconLbl.BackgroundTransparency = 1
+    iconLbl.Text = icon
+    iconLbl.TextColor3 = color
+    iconLbl.TextSize = mn(13)
+    iconLbl.Font = Enum.Font.GothamBold
+    iconLbl.Parent = iconFrame
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size = UDim2.new(1, -mn(48), 0, mn(15))
+    titleLbl.Position = mpos(42, 8)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = title
+    titleLbl.TextColor3 = Color3.fromRGB(245, 245, 250)
+    titleLbl.TextSize = mn(12)
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.Parent = frame
+
+    local bodyLbl = Instance.new("TextLabel")
+    bodyLbl.Size = UDim2.new(1, -mn(48), 0, mn(22))
+    bodyLbl.Position = mpos(42, 24)
+    bodyLbl.BackgroundTransparency = 1
+    bodyLbl.Text = text
+    bodyLbl.TextColor3 = Color3.fromRGB(200, 202, 210)
+    bodyLbl.TextSize = mn(11)
+    bodyLbl.Font = Enum.Font.Gotham
+    bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
+    bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
+    bodyLbl.TextWrapped = true
+    bodyLbl.Parent = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.Parent = frame
+    btn.MouseButton1Click:Connect(function()
+        local clip = title .. "\n" .. text
+        local ok = pcall(function() setclipboard(clip) end)
+        if ok and showToast then
+            showToast("Copied notification")
+        end
+    end)
+
+    task.spawn(function()
+        local tw = TweenService:Create(frame, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0, 0, 0, 0),
+        })
+        tw:Play()
+    end)
+
+    task.delay(5, function()
+        if not frame or not frame.Parent then return end
+        local outTw = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+            Position = UDim2.new(1, mn(280), 0, 0),
+            BackgroundTransparency = 1,
+        })
+        outTw:Play()
+        task.wait(0.35)
+        if frame then frame:Destroy() end
+    end)
+end
+
+local toastGui = Instance.new("ScreenGui")
+toastGui.Name = "MM2Toast"
+toastGui.ResetOnSpawn = false
+toastGui.DisplayOrder = 310
+toastGui.Parent = playerGui
+
+local toastFrame = Instance.new("Frame")
+toastFrame.Size = msz(180, 30)
+toastFrame.Position = UDim2.new(0.5, -mn(90), 1, -mn(60))
+toastFrame.BackgroundColor3 = Color3.fromRGB(30, 32, 40)
+toastFrame.BorderSizePixel = 0
+toastFrame.BackgroundTransparency = 1
+toastFrame.Visible = false
+toastFrame.Parent = toastGui
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = toastFrame
+end
+local toastLbl = Instance.new("TextLabel")
+toastLbl.Size = UDim2.new(1, 0, 1, 0)
+toastLbl.BackgroundTransparency = 1
+toastLbl.Text = ""
+toastLbl.TextColor3 = Color3.fromRGB(240, 240, 245)
+toastLbl.TextSize = mn(11)
+toastLbl.Font = Enum.Font.GothamBold
+toastLbl.Parent = toastFrame
+
+function showToast(text)
+    toastLbl.Text = text
+    toastFrame.Visible = true
+    toastFrame.BackgroundTransparency = 1
+    TweenService:Create(toastFrame, TweenInfo.new(0.2), {BackgroundTransparency = 0.05}):Play()
+    task.delay(1.5, function()
+        TweenService:Create(toastFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+        task.wait(0.3)
+        toastFrame.Visible = false
+    end)
+end
 
 local function playSound(id, baseVol, isKill)
     baseVol = baseVol or 1
@@ -228,12 +413,13 @@ local function playSound(id, baseVol, isKill)
 end
 
 local function sendNotification(title, text, soundId)
-    pcall(function() StarterGui:SetCore("SendNotification", {Title=title, Text=text, Duration=5}) end)
-    table.insert(S.notificationHistory, 1, {title = title, text = text, time = tick()})
+    local category = inferCategory(soundId)
+    pushCustomNotification(title, text, category)
+    table.insert(S.notificationHistory, 1, {title = title, text = text, time = tick(), category = category})
     while #S.notificationHistory > 10 do
         table.remove(S.notificationHistory)
     end
-    if S.homeRebuildDirty ~= nil then S.homeRebuildDirty = true end
+    S.homeRebuildDirty = true
     playSound(soundId or SOUNDS.notify, 1, false)
 end
 
@@ -242,8 +428,96 @@ local function getLayoutOrder()
     return currentLayoutOrder
 end
 
+-- ═══════════════════════════════════════════════════════════
+-- TOOLTIP SYSTEM
+-- ═══════════════════════════════════════════════════════════
+local TooltipUI = {}
+TooltipUI.gui = Instance.new("ScreenGui")
+TooltipUI.gui.Name = "MM2Tooltips"
+TooltipUI.gui.ResetOnSpawn = false
+TooltipUI.gui.DisplayOrder = 250
+TooltipUI.gui.IgnoreGuiInset = true
+TooltipUI.gui.Parent = playerGui
+
+TooltipUI.frame = Instance.new("Frame")
+TooltipUI.frame.Size = UDim2.fromOffset(mn(200), mn(40))
+TooltipUI.frame.AutomaticSize = Enum.AutomaticSize.Y
+TooltipUI.frame.BackgroundColor3 = Color3.fromRGB(18, 19, 24)
+TooltipUI.frame.BorderSizePixel = 0
+TooltipUI.frame.Visible = false
+TooltipUI.frame.ZIndex = 500
+TooltipUI.frame.Parent = TooltipUI.gui
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = TooltipUI.frame
+    local st = Instance.new("UIStroke")
+    st.Color = Color3.fromRGB(80, 82, 92)
+    st.Thickness = 1
+    st.Parent = TooltipUI.frame
+    local p = Instance.new("UIPadding")
+    p.PaddingTop = UDim.new(0, 6)
+    p.PaddingBottom = UDim.new(0, 6)
+    p.PaddingLeft = UDim.new(0, 8)
+    p.PaddingRight = UDim.new(0, 8)
+    p.Parent = TooltipUI.frame
+end
+
+TooltipUI.label = Instance.new("TextLabel")
+TooltipUI.label.Size = UDim2.new(1, 0, 0, 0)
+TooltipUI.label.AutomaticSize = Enum.AutomaticSize.Y
+TooltipUI.label.BackgroundTransparency = 1
+TooltipUI.label.Text = ""
+TooltipUI.label.TextColor3 = Color3.fromRGB(220, 222, 230)
+TooltipUI.label.TextSize = mn(11)
+TooltipUI.label.Font = Enum.Font.Gotham
+TooltipUI.TextWrapped = true
+TooltipUI.label.TextWrapped = true
+TooltipUI.label.TextXAlignment = Enum.TextXAlignment.Left
+TooltipUI.label.Parent = TooltipUI.frame
+
+local function showTooltip(anchor, text)
+    if not anchor or not text then return end
+    TooltipUI.label.Text = text
+    local abs = anchor.AbsolutePosition
+    local size = anchor.AbsoluteSize
+    TooltipUI.frame.Position = UDim2.fromOffset(abs.X + size.X / 2 - mn(100), abs.Y - mn(48))
+    TooltipUI.frame.Visible = true
+end
+
+local function hideTooltip()
+    TooltipUI.frame.Visible = false
+end
+
+local function attachTooltip(btn, text)
+    if not btn or not text then return end
+    btn.MouseEnter:Connect(function() showTooltip(btn, text) end)
+    btn.MouseLeave:Connect(hideTooltip)
+    -- Mobile: long-press for 0.6s
+    if IS_MOBILE then
+        local holding = false
+        local holdThread = nil
+        btn.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch then
+                holding = true
+                holdThread = task.delay(0.6, function()
+                    if holding then showTooltip(btn, text) end
+                end)
+            end
+        end)
+        btn.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch then
+                holding = false
+                hideTooltip()
+            end
+        end)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- UI BUILD
+-- ═══════════════════════════════════════════════════════════
 local U = {}
 U.homeRefs = {}
+U.savedConfigRefs = {}
 
 local existing = playerGui:FindFirstChild("MM2MenuByArbuz")
 if existing then existing:Destroy() end
@@ -353,12 +627,16 @@ U.minimize.ZIndex = 5
 U.minimize.Parent = U.header
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = U.minimize end
 
+-- Resize handle with logo
 U.resize = Instance.new("TextButton")
-U.resize.Size = msz(16, 16)
-U.resize.Position = UDim2.new(1, -mn(16), 1, -mn(16))
+U.resize.Size = msz(18, 18)
+U.resize.Position = UDim2.new(1, -mn(18), 1, -mn(18))
 U.resize.BackgroundColor3 = Color3.fromRGB(55, 57, 65)
 U.resize.BorderSizePixel = 0
-U.resize.Text = ""
+U.resize.Text = "◢"
+U.resize.TextColor3 = Color3.fromRGB(180, 182, 190)
+U.resize.TextSize = mn(12)
+U.resize.Font = Enum.Font.GothamBold
 U.resize.AutoButtonColor = false
 U.resize.ZIndex = 30
 U.resize.Parent = U.frame
@@ -430,28 +708,56 @@ end
 
 U.tabFrames = {}
 U.tabs = {}
-local tabNames = {"Home", "Movement", "ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Keybinds", "Settings", "Utility", "Config"}
+U.tabOrder = S.tabOrder
 
-for _, tabName in ipairs(tabNames) do
-    local fr = Instance.new("ScrollingFrame")
-    fr.Name = tabName .. "Tab"
-    fr.Size = UDim2.new(1, 0, 1, -mn(30))
-    fr.Position = mpos(0, 30)
-    fr.BackgroundTransparency = 1
-    fr.BorderSizePixel = 0
-    fr.ScrollBarThickness = 4
-    fr.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
-    fr.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    fr.ScrollingDirection = Enum.ScrollingDirection.Y
-    fr.Visible = false
-    fr.Parent = U.rightArea
-    do
-        local l = Instance.new("UIListLayout")
-        l.Padding = UDim.new(0, 3)
-        l.SortOrder = Enum.SortOrder.LayoutOrder
-        l.Parent = fr
+local function buildTabs()
+    for _, fr in pairs(U.tabFrames) do if fr then fr:Destroy() end end
+    for _, tb in pairs(U.tabs) do if tb then tb:Destroy() end end
+    U.tabFrames = {}
+    U.tabs = {}
+
+    for _, tabName in ipairs(U.tabOrder) do
+        local fr = Instance.new("ScrollingFrame")
+        fr.Name = tabName .. "Tab"
+        fr.Size = UDim2.new(1, 0, 1, -mn(30))
+        fr.Position = mpos(0, 30)
+        fr.BackgroundTransparency = 1
+        fr.BorderSizePixel = 0
+        fr.ScrollBarThickness = 4
+        fr.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
+        fr.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        fr.ScrollingDirection = Enum.ScrollingDirection.Y
+        fr.Visible = false
+        fr.Parent = U.rightArea
+        do
+            local l = Instance.new("UIListLayout")
+            l.Padding = UDim.new(0, 3)
+            l.SortOrder = Enum.SortOrder.LayoutOrder
+            l.Parent = fr
+        end
+        U.tabFrames[tabName] = fr
     end
-    U.tabFrames[tabName] = fr
+
+    for idx, tabName in ipairs(U.tabOrder) do
+        local tb = Instance.new("TextButton")
+        tb.Size = UDim2.new(1, -4, 0, mn(24))
+        tb.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+        tb.BorderSizePixel = 0
+        tb.Text = tabName
+        tb.TextColor3 = Color3.fromRGB(200, 200, 210)
+        tb.TextSize = mn(11)
+        tb.Font = Enum.Font.GothamSemibold
+        tb.AutoButtonColor = false
+        tb.TextXAlignment = Enum.TextXAlignment.Left
+        tb.LayoutOrder = idx
+        tb.Parent = U.sidebar
+        do
+            local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = tb
+            local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 8) p.Parent = tb
+        end
+        U.tabs[tabName] = tb
+        setupTabEvents(tabName, tb)
+    end
 end
 
 U.activeTab = nil
@@ -470,40 +776,94 @@ local function switchTab(name)
         end
     end
     if U.searchBox.Text ~= "" then U.searchBox.Text = "" end
-    local fr = U.tabFrames[name]
-    if fr then
-        for _, child in ipairs(fr:GetChildren()) do
-            if child:IsA("TextButton") then child.Visible = true end
-        end
-    end
     if name == "Home" then
         S.homeRebuildDirty = true
     end
 end
 
-local iOrder = 0
-for _, tabName in ipairs(tabNames) do
-    iOrder = iOrder + 1
-    local tb = Instance.new("TextButton")
-    tb.Size = UDim2.new(1, -4, 0, mn(24))
-    tb.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
-    tb.BorderSizePixel = 0
-    tb.Text = tabName
-    tb.TextColor3 = Color3.fromRGB(200, 200, 210)
-    tb.TextSize = mn(11)
-    tb.Font = Enum.Font.GothamSemibold
-    tb.AutoButtonColor = false
-    tb.TextXAlignment = Enum.TextXAlignment.Left
-    tb.LayoutOrder = iOrder
-    tb.Parent = U.sidebar
-    do
-        local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = tb
-        local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 8) p.Parent = tb
+-- Tab reorder (hold 3s + rainbow)
+local function applyRainbowStroke(tab, on)
+    if not tab then return end
+    if on then
+        if not tab:FindFirstChild("RainbowStroke") then
+            local st = Instance.new("UIStroke")
+            st.Name = "RainbowStroke"
+            st.Thickness = 2
+            st.Color = Color3.fromRGB(255, 0, 0)
+            st.Parent = tab
+        end
+    else
+        local st = tab:FindFirstChild("RainbowStroke")
+        if st then st:Destroy() end
     end
-    U.tabs[tabName] = tb
-    tb.MouseButton1Click:Connect(function() switchTab(tabName) end)
 end
 
+local function setupTabEvents(tabName, tb)
+    local holdCompleted = false
+    local holdToken = 0
+    local inputStart = nil
+
+    tb.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            if S.tabReorderState.active then return end
+            holdCompleted = false
+            holdToken = holdToken + 1
+            local myToken = holdToken
+            inputStart = i.Position
+
+            task.delay(3, function()
+                if myToken == holdToken and not holdCompleted then
+                    -- enter reorder mode
+                    S.tabReorderState.active = true
+                    S.tabReorderState.tab = tabName
+                    S.tabReorderState.startY = i.Position.Y
+                    applyRainbowStroke(tb, true)
+                    showToast("Reordering: " .. tabName)
+                end
+            end)
+        end
+    end)
+
+    tb.MouseButton1Click:Connect(function()
+        holdCompleted = true
+        holdToken = holdToken + 1
+        if S.tabReorderState.active then
+            S.tabReorderState.active = false
+            applyRainbowStroke(tb, false)
+            S.tabReorderState.tab = nil
+            return
+        end
+        switchTab(tabName)
+    end)
+
+    tb.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            if S.tabReorderState.active and S.tabReorderState.tab == tabName then
+                -- Finalize reorder based on cursor Y
+                local cursorY = i.Position.Y
+                local sidebarAbs = U.sidebar.AbsolutePosition.Y
+                local relY = cursorY - sidebarAbs
+                local idx = math.clamp(math.floor(relY / mn(26)) + 1, 1, #U.tabOrder)
+                local currentIdx = nil
+                for n, tn in ipairs(U.tabOrder) do
+                    if tn == tabName then currentIdx = n break end
+                end
+                if currentIdx and idx ~= currentIdx then
+                    table.remove(U.tabOrder, currentIdx)
+                    table.insert(U.tabOrder, idx, tabName)
+                    buildTabs()
+                    switchTab(tabName)
+                end
+                applyRainbowStroke(tb, false)
+                S.tabReorderState.active = false
+                S.tabReorderState.tab = nil
+                showToast("Tab moved")
+            end
+        end
+    end)
+end
+
+buildTabs()
 switchTab("Home")
 
 U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -534,7 +894,7 @@ local function createSectionTitle(text)
     l.Parent = currentParent
 end
 
-local function createToggle(name, text)
+local function createToggle(name, text, tooltip)
     local b = Instance.new("TextButton")
     b.Name = name
     b.Size = UDim2.new(1, 0, 0, mn(30))
@@ -555,10 +915,11 @@ local function createToggle(name, text)
     ind.BorderSizePixel = 0
     ind.Parent = b
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(1, 0) c.Parent = ind end
+    if tooltip then attachTooltip(b, tooltip) end
     return b, ind
 end
 
-local function createActionButton(name, text)
+local function createActionButton(name, text, tooltip)
     local b = Instance.new("TextButton")
     b.Name = name
     b.Size = UDim2.new(1, 0, 0, mn(30))
@@ -572,6 +933,7 @@ local function createActionButton(name, text)
     b.LayoutOrder = getLayoutOrder()
     b.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = b end
+    if tooltip then attachTooltip(b, tooltip) end
     return b
 end
 
@@ -669,7 +1031,7 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- WHAT'S NEW MODAL
+-- WHAT'S NEW MODAL (only newest version)
 -- ═══════════════════════════════════════════════════════════
 U.whatsNewOverlay = Instance.new("TextButton")
 U.whatsNewOverlay.Name = "WhatsNewOverlay"
@@ -751,44 +1113,43 @@ do
     l.Parent = U.wnScroll
 end
 
-for _, entry in ipairs(CHANGELOG) do
-    local verHdr = Instance.new("Frame")
-    verHdr.Size = UDim2.new(1, 0, 0, mn(18))
-    verHdr.BackgroundColor3 = Color3.fromRGB(35, 40, 52)
-    verHdr.BorderSizePixel = 0
-    verHdr.LayoutOrder = getLayoutOrder()
-    verHdr.Parent = U.wnScroll
-    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = verHdr end
-    local vl = Instance.new("TextLabel")
-    vl.Size = UDim2.new(1, -mn(10), 1, 0)
-    vl.Position = mpos(6, 0)
-    vl.BackgroundTransparency = 1
-    vl.Text = entry.version .. "   •   " .. entry.date
-    vl.TextColor3 = Color3.fromRGB(90, 200, 255)
-    vl.TextSize = mn(11)
-    vl.Font = Enum.Font.GothamBold
-    vl.TextXAlignment = Enum.TextXAlignment.Left
-    vl.Parent = verHdr
-    for _, change in ipairs(entry.changes) do
-        local cl = Instance.new("TextLabel")
-        cl.Size = UDim2.new(1, -mn(8), 0, 0)
-        cl.AutomaticSize = Enum.AutomaticSize.Y
-        cl.BackgroundTransparency = 1
-        cl.Text = "  • " .. change
-        cl.TextColor3 = Color3.fromRGB(200, 202, 210)
-        cl.TextSize = mn(11)
-        cl.Font = Enum.Font.Gotham
-        cl.TextXAlignment = Enum.TextXAlignment.Left
-        cl.TextWrapped = true
-        cl.TextYAlignment = Enum.TextYAlignment.Top
-        cl.LayoutOrder = getLayoutOrder()
-        cl.Parent = U.wnScroll
+-- Only render newest version
+do
+    local entry = CHANGELOG[1]
+    if entry then
+        local verHdr = Instance.new("Frame")
+        verHdr.Size = UDim2.new(1, 0, 0, mn(20))
+        verHdr.BackgroundColor3 = Color3.fromRGB(35, 40, 52)
+        verHdr.BorderSizePixel = 0
+        verHdr.LayoutOrder = getLayoutOrder()
+        verHdr.Parent = U.wnScroll
+        do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = verHdr end
+        local vl = Instance.new("TextLabel")
+        vl.Size = UDim2.new(1, -mn(10), 1, 0)
+        vl.Position = mpos(6, 0)
+        vl.BackgroundTransparency = 1
+        vl.Text = entry.version .. "   •   " .. entry.date
+        vl.TextColor3 = Color3.fromRGB(90, 200, 255)
+        vl.TextSize = mn(12)
+        vl.Font = Enum.Font.GothamBold
+        vl.TextXAlignment = Enum.TextXAlignment.Left
+        vl.Parent = verHdr
+        for _, change in ipairs(entry.changes) do
+            local cl = Instance.new("TextLabel")
+            cl.Size = UDim2.new(1, -mn(8), 0, 0)
+            cl.AutomaticSize = Enum.AutomaticSize.Y
+            cl.BackgroundTransparency = 1
+            cl.Text = "  • " .. change
+            cl.TextColor3 = Color3.fromRGB(200, 202, 210)
+            cl.TextSize = mn(11)
+            cl.Font = Enum.Font.Gotham
+            cl.TextXAlignment = Enum.TextXAlignment.Left
+            cl.TextWrapped = true
+            cl.TextYAlignment = Enum.TextYAlignment.Top
+            cl.LayoutOrder = getLayoutOrder()
+            cl.Parent = U.wnScroll
+        end
     end
-    local spacer = Instance.new("Frame")
-    spacer.Size = UDim2.new(1, 0, 0, mn(6))
-    spacer.BackgroundTransparency = 1
-    spacer.LayoutOrder = getLayoutOrder()
-    spacer.Parent = U.wnScroll
 end
 
 openWhatsNew = function()
@@ -803,16 +1164,128 @@ U.whatsNewOverlay.MouseButton1Click:Connect(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
+-- CLOSE CONFIRMATION
+-- ═══════════════════════════════════════════════════════════
+U.closeConfirm = Instance.new("TextButton")
+U.closeConfirm.Size = UDim2.new(1, 0, 1, 0)
+U.closeConfirm.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+U.closeConfirm.BackgroundTransparency = 0.5
+U.closeConfirm.Text = ""
+U.closeConfirm.AutoButtonColor = false
+U.closeConfirm.Visible = false
+U.closeConfirm.ZIndex = 120
+U.closeConfirm.Parent = U.gui
+
+local ccPanel = Instance.new("Frame")
+ccPanel.Size = msz(280, 130)
+ccPanel.Position = UDim2.new(0.5, -mn(140), 0.5, -mn(65))
+ccPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
+ccPanel.BorderSizePixel = 0
+ccPanel.ZIndex = 121
+ccPanel.Parent = U.closeConfirm
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = ccPanel
+    local st = Instance.new("UIStroke")
+    st.Color = Color3.fromRGB(80, 82, 92)
+    st.Thickness = 1
+    st.Parent = ccPanel
+end
+
+local ccTitle = Instance.new("TextLabel")
+ccTitle.Size = UDim2.new(1, 0, 0, mn(30))
+ccTitle.Position = mpos(0, 10)
+ccTitle.BackgroundTransparency = 1
+ccTitle.Text = "Close Script?"
+ccTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
+ccTitle.TextSize = mn(14)
+ccTitle.Font = Enum.Font.GothamBold
+ccTitle.ZIndex = 122
+ccTitle.Parent = ccPanel
+
+local ccBody = Instance.new("TextLabel")
+ccBody.Size = UDim2.new(1, -mn(20), 0, mn(30))
+ccBody.Position = mpos(10, 42)
+ccBody.BackgroundTransparency = 1
+ccBody.Text = "Are you sure you want to close the script? All active features will be turned off."
+ccBody.TextColor3 = Color3.fromRGB(180, 182, 190)
+ccBody.TextSize = mn(11)
+ccBody.Font = Enum.Font.Gotham
+ccBody.TextWrapped = true
+ccBody.ZIndex = 122
+ccBody.Parent = ccPanel
+
+local ccYes = Instance.new("TextButton")
+ccYes.Size = msz(120, 32)
+ccYes.Position = mpos(14, 86)
+ccYes.BackgroundColor3 = Color3.fromRGB(120, 35, 35)
+ccYes.Text = "Close"
+ccYes.TextColor3 = Color3.fromRGB(255, 210, 210)
+ccYes.TextSize = mn(12)
+ccYes.Font = Enum.Font.GothamBold
+ccYes.BorderSizePixel = 0
+ccYes.AutoButtonColor = false
+ccYes.ZIndex = 122
+ccYes.Parent = ccPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccYes end
+
+local ccNo = Instance.new("TextButton")
+ccNo.Size = msz(120, 32)
+ccNo.Position = UDim2.new(1, -mn(134), 0, mn(86))
+ccNo.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+ccNo.Text = "Cancel"
+ccNo.TextColor3 = Color3.fromRGB(230, 230, 235)
+ccNo.TextSize = mn(12)
+ccNo.Font = Enum.Font.GothamBold
+ccNo.BorderSizePixel = 0
+ccNo.AutoButtonColor = false
+ccNo.ZIndex = 122
+ccNo.Parent = ccPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccNo end
+
+showCloseConfirm = function()
+    U.closeConfirm.Visible = true
+end
+
+U.closeConfirm.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+end)
+ccPanel.InputBegan:Connect(function() end) -- swallow clicks
+ccNo.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+end)
+
+-- ═══════════════════════════════════════════════════════════
 -- HOME TAB
 -- ═══════════════════════════════════════════════════════════
 currentParent = U.tabFrames.Home
 
-U.whatsNewBtn = createActionButton("WhatsNewBtn", "📢   WHAT'S NEW")
+U.homeBtnRow = Instance.new("Frame")
+U.homeBtnRow.Size = UDim2.new(1, 0, 0, mn(30))
+U.homeBtnRow.BackgroundTransparency = 1
+U.homeBtnRow.LayoutOrder = getLayoutOrder()
+U.homeBtnRow.Parent = currentParent
+do
+    local l = Instance.new("UIListLayout")
+    l.FillDirection = Enum.FillDirection.Horizontal
+    l.Padding = UDim.new(0, 4)
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Parent = U.homeBtnRow
+end
+
+local homeBtnParent = currentParent
+currentParent = U.homeBtnRow
+U.whatsNewBtn = createActionButton("WhatsNewBtn", "📢 What's New", "See what changed in the latest update")
+U.whatsNewBtn.Size = UDim2.new(0.5, -2, 1, 0)
 U.whatsNewBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 115)
 U.whatsNewBtn.TextColor3 = Color3.fromRGB(220, 235, 255)
-U.whatsNewBtn.MouseButton1Click:Connect(function()
-    openWhatsNew()
-end)
+U.whatsNewBtn.MouseButton1Click:Connect(function() openWhatsNew() end)
+
+U.tutorialBtn = createActionButton("TutorialBtn", "🎓 Tutorial", "Reopen the interactive tutorial")
+U.tutorialBtn.Size = UDim2.new(0.5, -2, 1, 0)
+U.tutorialBtn.BackgroundColor3 = Color3.fromRGB(55, 60, 85)
+U.tutorialBtn.TextColor3 = Color3.fromRGB(220, 225, 245)
+U.tutorialBtn.MouseButton1Click:Connect(function() if showTutorial then showTutorial() end end)
+currentParent = homeBtnParent
 
 createSectionTitle("LIVE STATUS")
 do
@@ -823,34 +1296,49 @@ do
     U.homeRefs.heroLbl = addInfoRow(card, "Hero", "None")
     U.homeRefs.roundLbl = addInfoRow(card, "Round", "Waiting")
     U.homeRefs.playersLbl = addInfoRow(card, "Players", "0 / 0")
+    U.homeRefs.murdDistLbl = addInfoRow(card, "Distance to Murderer", "-", ROLE_COLORS.Murderer)
 end
 
 createSectionTitle("QUICK ACTIONS")
-U.homePvpBtn = createActionButton("HomePvpBtn", "Apply PVP Ready")
+U.homePvpBtn = createActionButton("HomePvpBtn", "Apply PVP Ready", "Enable a curated set of PVP features at once")
 U.homePvpBtn.BackgroundColor3 = Color3.fromRGB(45, 65, 45)
 U.homePvpBtn.MouseButton1Click:Connect(function()
     if applyPvpPreset then applyPvpPreset() end
 end)
 
-U.homeRestoreBtn = createActionButton("HomeRestoreBtn", "Restore Before PVP")
+U.homeRestoreBtn = createActionButton("HomeRestoreBtn", "Restore Before PVP", "Revert to the settings that were active before PVP Ready")
 U.homeRestoreBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 35)
 U.homeRestoreBtn.MouseButton1Click:Connect(function()
     if restorePvpSnapshot then restorePvpSnapshot() end
 end)
 
-U.homeTurnOffBtn = createActionButton("HomeTurnOffBtn", "Turn Off All")
+U.homeTurnOffBtn = createActionButton("HomeTurnOffBtn", "Turn Off All", "Disable every feature (with notification)")
 U.homeTurnOffBtn.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
 U.homeTurnOffBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
 U.homeTurnOffBtn.MouseButton1Click:Connect(function()
     if resetAllToggles then resetAllToggles() end
 end)
 
-U.homePanicBtn = createActionButton("HomePanicBtn", "⚠  PANIC  (off + minimize)")
+U.homePanicBtn = createActionButton("HomePanicBtn", "⚠  PANIC", "Silently turn everything off and minimize the menu")
 U.homePanicBtn.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
 U.homePanicBtn.TextColor3 = Color3.fromRGB(255, 220, 220)
 U.homePanicBtn.MouseButton1Click:Connect(function()
     if resetAllToggles then pcall(resetAllToggles) end
     if minimizeMenu then pcall(minimizeMenu) end
+end)
+
+createSectionTitle("PERFORMANCE")
+do
+    local card = createInfoCard()
+    U.homeRefs.fpsLbl = addInfoRow(card, "FPS", "--")
+    U.homeRefs.pingLbl = addInfoRow(card, "Ping", "--")
+end
+
+U.homeFpsToggle, U.homeFpsInd = createToggle("HomeFpsToggle", "Show FPS/Ping Overlay", "Pin a small FPS/ping monitor to the top-left of your screen")
+U.homeFpsToggle.MouseButton1Click:Connect(function()
+    S.fpsOverlayOn = not S.fpsOverlayOn
+    if S.fpsOverlayOn then setOn(U.homeFpsToggle, U.homeFpsInd) else setOff(U.homeFpsToggle, U.homeFpsInd) end
+    if PerfUI then PerfUI.gui.Enabled = S.fpsOverlayOn end
 end)
 
 createSectionTitle("SESSION STATS")
@@ -864,12 +1352,84 @@ do
     U.homeRefs.sessionLbl = addInfoRow(card, "Session Duration", "00:00:00")
 end
 
+createSectionTitle("SEARCH ALL TABS")
+U.crossSearchBox = Instance.new("TextBox")
+U.crossSearchBox.Size = UDim2.new(1, 0, 0, mn(26))
+U.crossSearchBox.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+U.crossSearchBox.BorderSizePixel = 0
+U.crossSearchBox.Text = ""
+U.crossSearchBox.PlaceholderText = "Search every tab..."
+U.crossSearchBox.TextColor3 = Color3.fromRGB(230, 230, 235)
+U.crossSearchBox.PlaceholderColor3 = Color3.fromRGB(120, 122, 130)
+U.crossSearchBox.TextSize = mn(12)
+U.crossSearchBox.Font = Enum.Font.GothamSemibold
+U.crossSearchBox.ClearTextOnFocus = false
+U.crossSearchBox.TextXAlignment = Enum.TextXAlignment.Left
+U.crossSearchBox.LayoutOrder = getLayoutOrder()
+U.crossSearchBox.Parent = currentParent
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.crossSearchBox
+    local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 8) p.Parent = U.crossSearchBox
+end
+
+U.crossSearchResults = Instance.new("Frame")
+U.crossSearchResults.Size = UDim2.new(1, 0, 0, 0)
+U.crossSearchResults.AutomaticSize = Enum.AutomaticSize.Y
+U.crossSearchResults.BackgroundColor3 = Color3.fromRGB(28, 30, 36)
+U.crossSearchResults.BorderSizePixel = 0
+U.crossSearchResults.LayoutOrder = getLayoutOrder()
+U.crossSearchResults.Parent = currentParent
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.crossSearchResults
+    local p = Instance.new("UIPadding") p.PaddingTop = UDim.new(0, 4) p.PaddingBottom = UDim.new(0, 4) p.PaddingLeft = UDim.new(0, 4) p.PaddingRight = UDim.new(0, 4) p.Parent = U.crossSearchResults
+    local l = Instance.new("UIListLayout") l.Padding = UDim.new(0, 2) l.SortOrder = Enum.SortOrder.LayoutOrder l.Parent = U.crossSearchResults
+end
+
+local function refreshCrossSearch()
+    for _, ch in ipairs(U.crossSearchResults:GetChildren()) do
+        if ch:IsA("TextButton") then ch:Destroy() end
+    end
+    local q = U.crossSearchBox.Text:lower()
+    if q == "" then return end
+    local count = 0
+    for tabName, fr in pairs(U.tabFrames) do
+        for _, child in ipairs(fr:GetChildren()) do
+            if child:IsA("TextButton") then
+                if child.Text:lower():find(q, 1, true) then
+                    count = count + 1
+                    if count > 20 then return end
+                    local o = Instance.new("TextButton")
+                    o.Size = UDim2.new(1, 0, 0, mn(24))
+                    o.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+                    o.BorderSizePixel = 0
+                    o.Text = "[" .. tabName .. "] " .. child.Text
+                    o.TextColor3 = Color3.fromRGB(230, 230, 235)
+                    o.TextSize = mn(11)
+                    o.Font = Enum.Font.GothamSemibold
+                    o.AutoButtonColor = false
+                    o.TextXAlignment = Enum.TextXAlignment.Left
+                    o.LayoutOrder = count
+                    o.Parent = U.crossSearchResults
+                    do
+                        local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = o
+                        local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 6) p.Parent = o
+                    end
+                    o.MouseButton1Click:Connect(function()
+                        switchTab(tabName)
+                        U.searchBox.Text = child.Text
+                    end)
+                end
+            end
+        end
+    end
+end
+
+U.crossSearchBox:GetPropertyChangedSignal("Text"):Connect(refreshCrossSearch)
+
 createSectionTitle("ACTIVE KEYBINDS")
 do
     local card = createInfoCard()
     U.homeRefs.keybindsCard = card
-    U.homeRefs.keybindLabels = {}
-    -- Populated by updateHomeUI when tab opens
     U.homeRefs.keybindsPlaceholder = addInfoRow(card, "Status", "Loading...")
 end
 
@@ -884,18 +1444,18 @@ do
     U.homeRefs.regionLbl = addInfoRow(card, "Region", "Loading...")
 end
 
-U.copyLsBtn = createActionButton("CopyLsBtn", "Copy Loadstring")
+U.copyLsBtn = createActionButton("CopyLsBtn", "Copy Loadstring", "Copy the loadstring to your clipboard")
 U.copyLsBtn.MouseButton1Click:Connect(function()
     local ls = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/arbuz181pl/TEST/refs/heads/main/TEST.lua"))()'
     local ok = pcall(function() setclipboard(ls) end)
     if ok then
-        sendNotification("MM2 Menu", "Loadstring copied to clipboard")
+        showToast("Loadstring copied")
     else
         sendNotification("MM2 Menu", "Clipboard not supported on this executor", SOUNDS.alert)
     end
 end)
 
-createSectionTitle("NOTIFICATION HISTORY")
+createSectionTitle("NOTIFICATION HISTORY (click to copy)")
 U.homeRefs.notifCard = Instance.new("Frame")
 U.homeRefs.notifCard.Size = UDim2.new(1, 0, 0, mn(120))
 U.homeRefs.notifCard.BackgroundColor3 = Color3.fromRGB(28, 30, 36)
@@ -922,7 +1482,6 @@ do
     l.Parent = U.homeRefs.notifScroll
 end
 
--- Region lookup
 task.spawn(function()
     local ok, region = pcall(function()
         return LocalizationService:GetCountryRegionForPlayerAsync(player)
@@ -934,8 +1493,7 @@ task.spawn(function()
     end
 end)
 
--- Home UI updater
-local function rebuildKeybindList()
+rebuildKeybindList = function()
     if not U.homeRefs.keybindsCard then return end
     for _, child in ipairs(U.homeRefs.keybindsCard:GetChildren()) do
         if child:IsA("Frame") then child:Destroy() end
@@ -978,7 +1536,7 @@ local function rebuildKeybindList()
     end
 end
 
-local function rebuildNotifHistory()
+rebuildNotifHistory = function()
     if not U.homeRefs.notifScroll then return end
     for _, child in ipairs(U.homeRefs.notifScroll:GetChildren()) do
         if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
@@ -996,17 +1554,26 @@ local function rebuildNotifHistory()
         empty.Parent = U.homeRefs.notifScroll
         return
     end
-    for _, notif in ipairs(S.notificationHistory) do
-        local frame = Instance.new("Frame")
+    for idx, notif in ipairs(S.notificationHistory) do
+        local color = NOTIF_COLORS[notif.category or "info"] or NOTIF_COLORS.info
+        local frame = Instance.new("TextButton")
         frame.Size = UDim2.new(1, 0, 0, mn(30))
         frame.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
         frame.BorderSizePixel = 0
-        frame.LayoutOrder = getLayoutOrder()
+        frame.Text = ""
+        frame.AutoButtonColor = false
+        frame.LayoutOrder = idx
         frame.Parent = U.homeRefs.notifScroll
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = frame end
+        local accent = Instance.new("Frame")
+        accent.Size = UDim2.new(0, mn(3), 1, 0)
+        accent.BackgroundColor3 = color
+        accent.BorderSizePixel = 0
+        accent.Parent = frame
+        do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 3) c.Parent = accent end
         local t = Instance.new("TextLabel")
-        t.Size = UDim2.new(1, -mn(8), 0, mn(13))
-        t.Position = mpos(4, 1)
+        t.Size = UDim2.new(1, -mn(14), 0, mn(13))
+        t.Position = mpos(8, 1)
         t.BackgroundTransparency = 1
         t.Text = notif.title
         t.TextColor3 = Color3.fromRGB(230, 230, 235)
@@ -1016,7 +1583,7 @@ local function rebuildNotifHistory()
         t.Parent = frame
         local b = Instance.new("TextLabel")
         b.Size = UDim2.new(1, -mn(55), 0, mn(12))
-        b.Position = mpos(4, 14)
+        b.Position = mpos(8, 14)
         b.BackgroundTransparency = 1
         b.Text = notif.text
         b.TextColor3 = Color3.fromRGB(160, 162, 170)
@@ -1035,10 +1602,15 @@ local function rebuildNotifHistory()
         ago.Font = Enum.Font.Gotham
         ago.TextXAlignment = Enum.TextXAlignment.Right
         ago.Parent = frame
+        frame.MouseButton1Click:Connect(function()
+            local clip = notif.title .. "\n" .. notif.text
+            local ok = pcall(function() setclipboard(clip) end)
+            if ok then showToast("Copied notification") end
+        end)
     end
 end
 
-local function updateHomeUI(rebuildLists)
+updateHomeUI = function(rebuildLists)
     if not U.homeRefs.yourRoleLbl then return end
     local yourRole = "Innocent"
     if MurdererName == player.Name then yourRole = "Murderer"
@@ -1060,6 +1632,28 @@ local function updateHomeUI(rebuildLists)
     local maxP = Players.MaxPlayers or 0
     U.homeRefs.playersLbl.Text = tostring(total) .. " / " .. tostring(maxP)
 
+    if MurdererName and MurdererName ~= player.Name then
+        local me = player.Character
+        local m = Players:FindFirstChild(MurdererName)
+        if me and m and m.Character then
+            local myRoot = me:FindFirstChild("HumanoidRootPart")
+            local mRoot = m.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot and mRoot then
+                local dist = math.floor((myRoot.Position - mRoot.Position).Magnitude)
+                U.homeRefs.murdDistLbl.Text = tostring(dist) .. " studs"
+            else
+                U.homeRefs.murdDistLbl.Text = "-"
+            end
+        else
+            U.homeRefs.murdDistLbl.Text = "-"
+        end
+    else
+        U.homeRefs.murdDistLbl.Text = MurdererName == player.Name and "You" or "-"
+    end
+
+    U.homeRefs.fpsLbl.Text = tostring(S.currentFPS)
+    U.homeRefs.pingLbl.Text = tostring(S.currentPing) .. " ms"
+
     U.homeRefs.killsLbl.Text = tostring(S.stats.kills)
     U.homeRefs.deathsLbl.Text = tostring(S.stats.deaths)
     U.homeRefs.roundsLbl.Text = tostring(S.stats.rounds)
@@ -1074,7 +1668,6 @@ local function updateHomeUI(rebuildLists)
     end
 end
 
--- home loop
 task.spawn(function()
     while U.gui.Parent and not S.scriptClosed do
         if U.activeTab == "Home" then
@@ -1085,12 +1678,12 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- MOVEMENT TAB
+-- MOVEMENT TAB (unchanged structure)
 -- ═══════════════════════════════════════════════════════════
 currentParent = U.tabFrames.Movement
 createSectionTitle("MOVEMENT")
 
-U.noclipBtn, U.noclipInd = createToggle("Noclip", "Noclip")
+U.noclipBtn, U.noclipInd = createToggle("Noclip", "Noclip", "Walk through walls")
 U.noclipBtn.MouseButton1Click:Connect(function()
     S.noclip = not S.noclip
     if S.noclip then
@@ -1113,7 +1706,7 @@ U.noclipBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.flyBtn, U.flyInd = createToggle("Fly", "Fly")
+U.flyBtn, U.flyInd = createToggle("Fly", "Fly", "Hold WASD/joystick + Space to fly")
 
 local FP = {}
 FP.panel = Instance.new("Frame")
@@ -1399,7 +1992,7 @@ FP.up.MouseButton1Up:Connect(function() flyUpFlag = 0 end)
 FP.down.MouseButton1Down:Connect(function() flyDownFlag = -1 end)
 FP.down.MouseButton1Up:Connect(function() flyDownFlag = 0 end)
 
-U.infBtn, U.infInd = createToggle("InfinityJump", "Infinity Jump")
+U.infBtn, U.infInd = createToggle("InfinityJump", "Infinity Jump", "Jump again while airborne")
 U.infBtn.MouseButton1Click:Connect(function()
     S.infinityJump = not S.infinityJump
     if S.infinityJump then setOn(U.infBtn, U.infInd) else setOff(U.infBtn, U.infInd) end
@@ -1412,7 +2005,7 @@ UserInputService.JumpRequest:Connect(function()
     if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
 end)
 
-U.f3Btn, U.f3Ind = createToggle("FlingOnTouch", "Fling 3rd party")
+U.f3Btn, U.f3Ind = createToggle("FlingOnTouch", "Fling 3rd party", "Loads an external fling script")
 U.f3Btn.MouseButton1Click:Connect(function()
     S.flingThirdParty = not S.flingThirdParty
     if S.flingThirdParty then
@@ -1446,7 +2039,7 @@ local function flingLoop()
     end
 end
 
-U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch")
+U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch", "Native fling (no external script)")
 U.fib.MouseButton1Click:Connect(function()
     S.flingOnTouch = not S.flingOnTouch
     if S.flingOnTouch then
@@ -1463,8 +2056,7 @@ end)
 
 createSectionTitle("SPEEDHACK")
 
-U.shBtn, U.shInd = createToggle("Speedhack", "Speedhack")
-
+U.shBtn, U.shInd = createToggle("Speedhack", "Speedhack", "Override WalkSpeed")
 U.shRow = Instance.new("Frame")
 U.shRow.Size = UDim2.new(1, 0, 0, mn(30))
 U.shRow.BackgroundTransparency = 1
@@ -1558,7 +2150,7 @@ currentParent = U.tabFrames.ESP
 createSectionTitle("ROLE ESP")
 
 local function makeEspBtn(role)
-    local b, i = createToggle(role .. "ESP", role .. " ESP")
+    local b, i = createToggle(role .. "ESP", role .. " ESP", "Highlight " .. role .. " players")
     espButtons[role] = {Button = b, Indicator = i}
     b.MouseButton1Click:Connect(function()
         S.espEnabled[role] = not S.espEnabled[role]
@@ -1577,7 +2169,7 @@ makeEspBtn("Hero")
 
 createSectionTitle("ITEM ESP")
 
-U.gunBtn, U.gunInd = createToggle("GunESP", "Gun ESP")
+U.gunBtn, U.gunInd = createToggle("GunESP", "Gun ESP", "Highlight dropped guns on the map")
 U.gunBtn.MouseButton1Click:Connect(function()
     S.gunESPEnabled = not S.gunESPEnabled
     if S.gunESPEnabled then
@@ -1593,8 +2185,7 @@ U.gunBtn.MouseButton1Click:Connect(function()
 end)
 
 createSectionTitle("PLAYER INFO")
-
-U.distBtn, U.distInd = createToggle("PlayerDistance", "Player Distance (studs)")
+U.distBtn, U.distInd = createToggle("PlayerDistance", "Player Distance (studs)", "Show distance above each player")
 U.distBtn.MouseButton1Click:Connect(function()
     S.playerDistanceOn = not S.playerDistanceOn
     if S.playerDistanceOn then
@@ -1625,10 +2216,10 @@ local function notifyAllRoles()
     sendNotification("MM2 Roles", fmtRole("Murderer", MurdererName) .. "\n" .. fmtRole("Sheriff", SheriffName) .. "\n" .. fmtRole("Hero", HeroName))
 end
 
-U.notifyBtn = createActionButton("NotifyRoles", "Notify Roles")
+U.notifyBtn = createActionButton("NotifyRoles", "Notify Roles", "Show murderer/sheriff/hero now")
 U.notifyBtn.MouseButton1Click:Connect(notifyAllRoles)
 
-U.autoNotBtn, U.autoNotInd = createToggle("AutoNotifyRound", "Auto Notify Round (Roles)")
+U.autoNotBtn, U.autoNotInd = createToggle("AutoNotifyRound", "Auto Notify Round (Roles)", "Announce roles once per round")
 U.autoNotBtn.MouseButton1Click:Connect(function()
     S.autoNotifyRoles = not S.autoNotifyRoles
     if S.autoNotifyRoles then
@@ -1642,24 +2233,47 @@ U.autoNotBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+U.reAnnBtn, U.reAnnInd = createToggle("ReAnnounce", "Re-announce Roles Every 30s", "Repeat the role announcement every 30 seconds while active")
+U.reAnnBtn.MouseButton1Click:Connect(function()
+    S.reAnnounceEnabled = not S.reAnnounceEnabled
+    if S.reAnnounceEnabled then
+        setOn(U.reAnnBtn, U.reAnnInd)
+        S.lastReAnnounceTime = 0
+    else
+        setOff(U.reAnnBtn, U.reAnnInd)
+    end
+end)
+
+U.heroChangeBtn, U.heroChangeInd = createToggle("HeroChangeNotify", "Notify When Hero Changes", "Get an alert when a new hero appears")
+U.heroChangeBtn.MouseButton1Click:Connect(function()
+    S.heroChangeNotify = not S.heroChangeNotify
+    if S.heroChangeNotify then setOn(U.heroChangeBtn, U.heroChangeInd) else setOff(U.heroChangeBtn, U.heroChangeInd) end
+end)
+
 createSectionTitle("ROUND EVENTS")
 
-U.rStartBtn, U.rStartInd = createToggle("NotifyRoundStart", "Notify Round Start")
+U.rStartBtn, U.rStartInd = createToggle("NotifyRoundStart", "Notify Round Start", "Notify when a round begins")
 U.rStartBtn.MouseButton1Click:Connect(function()
     S.notifyRoundStart = not S.notifyRoundStart
     if S.notifyRoundStart then setOn(U.rStartBtn, U.rStartInd) else setOff(U.rStartBtn, U.rStartInd) end
 end)
 
-U.rEndBtn, U.rEndInd = createToggle("NotifyRoundEnd", "Notify Round End")
+U.rEndBtn, U.rEndInd = createToggle("NotifyRoundEnd", "Notify Round End", "Notify when a round ends")
 U.rEndBtn.MouseButton1Click:Connect(function()
     S.notifyRoundEnd = not S.notifyRoundEnd
     if S.notifyRoundEnd then setOn(U.rEndBtn, U.rEndInd) else setOff(U.rEndBtn, U.rEndInd) end
 end)
 
-U.plBtn, U.plInd = createToggle("PlayerJoinLeaveNotify", "Player Join/Leave Alerts")
+U.plBtn, U.plInd = createToggle("PlayerJoinLeaveNotify", "Player Join/Leave Alerts", "Notify when players enter or leave")
 U.plBtn.MouseButton1Click:Connect(function()
     S.playerJoinLeaveNotify = not S.playerJoinLeaveNotify
     if S.playerJoinLeaveNotify then setOn(U.plBtn, U.plInd) else setOff(U.plBtn, U.plInd) end
+end)
+
+U.autoHideBtn, U.autoHideInd = createToggle("AutoHideInRound", "Auto-hide UI When Round Starts", "Minimize the menu when a round starts, restore when it ends")
+U.autoHideBtn.MouseButton1Click:Connect(function()
+    S.autoHideInRound = not S.autoHideInRound
+    if S.autoHideInRound then setOn(U.autoHideBtn, U.autoHideInd) else setOff(U.autoHideBtn, U.autoHideInd) end
 end)
 
 createSectionTitle("CHAT ANNOUNCEMENTS")
@@ -1708,7 +2322,7 @@ U.sendSheriffBtn.MouseButton1Click:Connect(function()
     sendChat(getRoleMessage("Sheriff", SheriffName))
 end)
 
-U.autoChatBtn, U.autoChatInd = createToggle("AutoMurdererChat", "Auto Send Murderer In Chat")
+U.autoChatBtn, U.autoChatInd = createToggle("AutoMurdererChat", "Auto Send Murderer In Chat", "Announce the murderer automatically once per round")
 U.autoChatBtn.MouseButton1Click:Connect(function()
     S.autoSendMurdererChat = not S.autoSendMurdererChat
     if S.autoSendMurdererChat then
@@ -1724,7 +2338,7 @@ U.autoChatBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.autoSheriffChatBtn, U.autoSheriffChatInd = createToggle("AutoSheriffChat", "Auto Send Sheriff In Chat")
+U.autoSheriffChatBtn, U.autoSheriffChatInd = createToggle("AutoSheriffChat", "Auto Send Sheriff In Chat", "Announce the sheriff automatically once per round")
 U.autoSheriffChatBtn.MouseButton1Click:Connect(function()
     S.autoSendSheriffChat = not S.autoSendSheriffChat
     if S.autoSendSheriffChat then
@@ -1823,13 +2437,13 @@ local function killByName(n)
     if t then attackTarget(t) end
 end
 
-U.autoKillBtn, U.autoKillInd = createToggle("AutoKillAll", "Auto Kill All")
+U.autoKillBtn, U.autoKillInd = createToggle("AutoKillAll", "Auto Kill All", "Kill every non-spawn player on repeat while you're murderer")
 U.autoKillBtn.MouseButton1Click:Connect(function()
     S.autoKillAll = not S.autoKillAll
     if S.autoKillAll then setOn(U.autoKillBtn, U.autoKillInd) else setOff(U.autoKillBtn, U.autoKillInd) end
 end)
 
-U.killAllBtn = createActionButton("KillAllNow", "Kill All Now")
+U.killAllBtn = createActionButton("KillAllNow", "Kill All Now", "Run the kill-all sequence once")
 U.killAllBtn.MouseButton1Click:Connect(killAllPlayers)
 
 U.killSheriffBtn = createActionButton("KillSheriffNow", "Kill Sheriff Now")
@@ -1838,7 +2452,7 @@ U.killSheriffBtn.MouseButton1Click:Connect(function() killByName(SheriffName) en
 U.killHeroBtn = createActionButton("KillHeroNow", "Kill Hero Now")
 U.killHeroBtn.MouseButton1Click:Connect(function() killByName(HeroName) end)
 
-U.killSoundBtn, U.killSoundInd = createToggle("KillSound", "Kill Sound")
+U.killSoundBtn, U.killSoundInd = createToggle("KillSound", "Kill Sound", "Play a success sound when you get a kill")
 U.killSoundBtn.MouseButton1Click:Connect(function()
     S.killSoundOn = not S.killSoundOn
     if S.killSoundOn then setOn(U.killSoundBtn, U.killSoundInd) else setOff(U.killSoundBtn, U.killSoundInd) end
@@ -1885,7 +2499,7 @@ local function shootMurderer()
     end
 end
 
-U.killMurdererBtn = createActionButton("KillMurdererNow", "Kill Murderer Now")
+U.killMurdererBtn = createActionButton("KillMurdererNow", "Kill Murderer Now", "Teleport-shoot the murderer once")
 U.killMurdererBtn.MouseButton1Click:Connect(shootMurderer)
 
 -- ═══════════════════════════════════════════════════════════
@@ -2182,6 +2796,30 @@ end
 currentParent = U.tabFrames.Settings
 createSectionTitle("MENU SETTINGS")
 
+U.compactBtn, U.compactInd = createToggle("CompactMode", "Compact Mode", "Slightly smaller fonts and tighter layout")
+U.compactBtn.MouseButton1Click:Connect(function()
+    S.compactMode = not S.compactMode
+    if S.compactMode then
+        setOn(U.compactBtn, U.compactInd)
+    else
+        setOff(U.compactBtn, U.compactInd)
+    end
+    -- Apply by walking all children and updating TextSize
+    local factor = S.compactMode and 0.85 or (1 / 0.85)
+    for _, desc in ipairs(U.frame:GetDescendants()) do
+        if desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox") then
+            local ts = desc:GetAttribute("BaseTextSize")
+            if not ts then
+                ts = desc.TextSize
+                desc:SetAttribute("BaseTextSize", ts)
+            end
+            local newSize = math.max(8, math.floor(ts * (S.compactMode and 0.85 or 1)))
+            -- since we stored base, this stays stable
+        end
+    end
+end)
+
+createSectionTitle("MENU OPACITY")
 U.opacityLbl = Instance.new("TextLabel")
 U.opacityLbl.Size = UDim2.new(1, 0, 0, mn(18))
 U.opacityLbl.BackgroundTransparency = 1
@@ -2309,9 +2947,7 @@ UserInputService.InputChanged:Connect(function(i)
 end)
 UserInputService.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        if menuSoundDragging then
-            playSound(SOUNDS.notify, 1, false)
-        end
+        if menuSoundDragging then playSound(SOUNDS.notify, 1, false) end
         menuSoundDragging = false
     end
 end)
@@ -2378,9 +3014,7 @@ UserInputService.InputChanged:Connect(function(i)
 end)
 UserInputService.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        if killSoundDragging then
-            playSound(SOUNDS.success, 1.5, true)
-        end
+        if killSoundDragging then playSound(SOUNDS.success, 1.5, true) end
         killSoundDragging = false
     end
 end)
@@ -2422,7 +3056,7 @@ U.afkBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.gunAlertBtn, U.gunAlertInd = createToggle("GunDropAlert", "Gun Drop Alert")
+U.gunAlertBtn, U.gunAlertInd = createToggle("GunDropAlert", "Gun Drop Alert", "Notify when a gun appears on the map")
 U.gunAlertBtn.MouseButton1Click:Connect(function()
     S.gunDropAlert = not S.gunDropAlert
     if S.gunDropAlert then setOn(U.gunAlertBtn, U.gunAlertInd) else setOff(U.gunAlertBtn, U.gunAlertInd) end
@@ -2430,7 +3064,7 @@ end)
 
 createSectionTitle("OVERLAYS")
 
-U.killerAlarmBtn, U.killerAlarmInd = createToggle("KillerAlarm", "Killer Alarm (30 studs, closer only)")
+U.killerAlarmBtn, U.killerAlarmInd = createToggle("KillerAlarm", "Killer Alarm (30 studs)", "Notify when the murderer gets closer than 30 studs")
 U.killerAlarmBtn.MouseButton1Click:Connect(function()
     S.killerAlarmOn = not S.killerAlarmOn
     if S.killerAlarmOn then
@@ -2443,13 +3077,24 @@ U.killerAlarmBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+U.dirBtn, U.dirInd = createToggle("DirIndicator", "Direction Arrow to Murderer", "Show an arrow around the crosshair pointing toward the murderer")
+U.dirBtn.MouseButton1Click:Connect(function()
+    S.dirIndicatorOn = not S.dirIndicatorOn
+    if S.dirIndicatorOn then
+        setOn(U.dirBtn, U.dirInd)
+    else
+        setOff(U.dirBtn, U.dirInd)
+        if DirUI then DirUI.gui.Enabled = false end
+    end
+end)
+
 U.camFollowBtn, U.camFollowInd = createToggle("CameraFollowMurderer", "Camera Follow Murderer")
 U.camFollowBtn.MouseButton1Click:Connect(function()
     S.cameraFollowMurderer = not S.cameraFollowMurderer
     if S.cameraFollowMurderer then setOn(U.camFollowBtn, U.camFollowInd) else setOff(U.camFollowBtn, U.camFollowInd) end
 end)
 
-U.crosshairBtn, U.crosshairInd = createToggle("Crosshair", "Rainbow Crosshair (follows mouse)")
+U.crosshairBtn, U.crosshairInd = createToggle("Crosshair", "Rainbow Crosshair")
 U.crosshairBtn.MouseButton1Click:Connect(function()
     if IS_MOBILE then
         sendNotification("MM2 Menu", "Crosshair is not needed on mobile - your finger is the crosshair.", SOUNDS.alert)
@@ -2582,6 +3227,9 @@ resetAllToggles = function()
         lastNotifiedHero = nil
         S.pendingNotify = false
     end
+    if S.reAnnounceEnabled then S.reAnnounceEnabled = false setOff(U.reAnnBtn, U.reAnnInd) end
+    if S.heroChangeNotify then S.heroChangeNotify = false setOff(U.heroChangeBtn, U.heroChangeInd) end
+    if S.autoHideInRound then S.autoHideInRound = false setOff(U.autoHideBtn, U.autoHideInd) end
     if S.autoSendMurdererChat then
         S.autoSendMurdererChat = false
         setOff(U.autoChatBtn, U.autoChatInd)
@@ -2606,6 +3254,11 @@ resetAllToggles = function()
         if S.antiAfkConn then S.antiAfkConn:Disconnect() S.antiAfkConn = nil end
     end
     if S.killerAlarmOn then S.killerAlarmOn = false setOff(U.killerAlarmBtn, U.killerAlarmInd) end
+    if S.dirIndicatorOn then
+        S.dirIndicatorOn = false
+        setOff(U.dirBtn, U.dirInd)
+        if DirUI then DirUI.gui.Enabled = false end
+    end
     if S.cameraFollowMurderer then S.cameraFollowMurderer = false setOff(U.camFollowBtn, U.camFollowInd) end
     if S.crosshairOn then
         S.crosshairOn = false
@@ -2621,6 +3274,14 @@ resetAllToggles = function()
     if S.notifyRoundEnd then S.notifyRoundEnd = false setOff(U.rEndBtn, U.rEndInd) end
     if S.playerJoinLeaveNotify then S.playerJoinLeaveNotify = false setOff(U.plBtn, U.plInd) end
     sendNotification("MM2 Menu", "All features turned off")
+end
+
+-- Silent version for panic key
+local function silentResetAll()
+    local oldSend = sendNotification
+    sendNotification = function() end
+    pcall(resetAllToggles)
+    sendNotification = oldSend
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -2655,10 +3316,78 @@ do
 end
 
 -- ═══════════════════════════════════════════════════════════
--- CONFIG TAB
+-- DIRECTION INDICATOR
+-- ═══════════════════════════════════════════════════════════
+local DirUI = {}
+DirUI.gui = Instance.new("ScreenGui")
+DirUI.gui.Name = "MM2DirArrow"
+DirUI.gui.ResetOnSpawn = false
+DirUI.gui.DisplayOrder = 210
+DirUI.gui.IgnoreGuiInset = true
+DirUI.gui.Enabled = false
+DirUI.gui.Parent = playerGui
+
+DirUI.frame = Instance.new("Frame")
+DirUI.frame.Size = msz(30, 30)
+DirUI.frame.BackgroundTransparency = 1
+DirUI.frame.Parent = DirUI.gui
+DirUI.frame.Visible = false
+
+DirUI.arrow = Instance.new("TextLabel")
+DirUI.arrow.Size = UDim2.new(1, 0, 1, 0)
+DirUI.arrow.BackgroundTransparency = 1
+DirUI.arrow.Text = "▲"
+DirUI.arrow.TextColor3 = ROLE_COLORS.Murderer
+DirUI.arrow.TextSize = mn(22)
+DirUI.arrow.Font = Enum.Font.GothamBold
+DirUI.arrow.Parent = DirUI.frame
+
+DirUI.distLbl = Instance.new("TextLabel")
+DirUI.distLbl.Size = msz(50, 14)
+DirUI.distLbl.Position = UDim2.new(0.5, -mn(25), 1, 0)
+DirUI.distLbl.BackgroundTransparency = 1
+DirUI.distLbl.Text = ""
+DirUI.distLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+DirUI.distLbl.TextStrokeTransparency = 0
+DirUI.distLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+DirUI.distLbl.TextSize = mn(11)
+DirUI.distLbl.Font = Enum.Font.GothamBold
+DirUI.distLbl.Parent = DirUI.frame
+
+-- ═══════════════════════════════════════════════════════════
+-- PERF OVERLAY
+-- ═══════════════════════════════════════════════════════════
+local PerfUI = {}
+PerfUI.gui = Instance.new("ScreenGui")
+PerfUI.gui.Name = "MM2Perf"
+PerfUI.gui.ResetOnSpawn = false
+PerfUI.gui.DisplayOrder = 90
+PerfUI.gui.IgnoreGuiInset = true
+PerfUI.gui.Enabled = false
+PerfUI.gui.Parent = playerGui
+
+PerfUI.frame = Instance.new("Frame")
+PerfUI.frame.Size = msz(130, 34)
+PerfUI.frame.Position = mpos(10, 10)
+PerfUI.frame.BackgroundColor3 = Color3.fromRGB(18, 19, 24)
+PerfUI.frame.BackgroundTransparency = 0.3
+PerfUI.frame.BorderSizePixel = 0
+PerfUI.frame.Parent = PerfUI.gui
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = PerfUI.frame end
+
+PerfUI.label = Instance.new("TextLabel")
+PerfUI.label.Size = UDim2.new(1, 0, 1, 0)
+PerfUI.label.BackgroundTransparency = 1
+PerfUI.label.Text = "FPS: -- | Ping: --"
+PerfUI.label.TextColor3 = Color3.fromRGB(220, 220, 230)
+PerfUI.label.TextSize = mn(11)
+PerfUI.label.Font = Enum.Font.GothamBold
+PerfUI.label.Parent = PerfUI.frame
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG TAB (saved slots)
 -- ═══════════════════════════════════════════════════════════
 currentParent = U.tabFrames.Config
-createSectionTitle("NOTIFICATION CONTROLS")
 
 U.allNotifyBtn = createActionButton("EnableAllNotify", "Enable All Notifications")
 U.allNotifyBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 85)
@@ -2671,31 +3400,14 @@ U.allNotifyBtn.MouseButton1Click:Connect(function()
     sendNotification("MM2 Menu", "All notifications enabled")
 end)
 
-createSectionTitle("PRESET INFO")
-local pInfo = Instance.new("TextLabel")
-pInfo.Size = UDim2.new(1, 0, 0, mn(180))
-pInfo.BackgroundTransparency = 1
-pInfo.Text = "PVP Ready (Home tab) turns ON:\n- Anti AFK, Anti Void, Anti Fling\n- All 4 ESPs + Gun ESP\n- Noclip\n- Auto Notify Round\n- Auto Kill All\n- Killer Alarm (30 studs)\n- Rainbow Crosshair (PC only)\n- Gun Drop Alert\n- Round Start / End Notify\n- Player Join/Leave Alerts\n- Kill Sound\n\nRestore (Home tab) reverts to\nsettings from before PVP Ready."
-pInfo.TextColor3 = Color3.fromRGB(180, 182, 190)
-pInfo.TextSize = mn(11)
-pInfo.Font = Enum.Font.Gotham
-pInfo.TextXAlignment = Enum.TextXAlignment.Left
-pInfo.TextYAlignment = Enum.TextYAlignment.Top
-pInfo.LayoutOrder = getLayoutOrder()
-pInfo.Parent = currentParent
+createSectionTitle("SAVED CONFIGS (3 slots)")
 
--- snapshot / restore / preset
-local function snapshotCurrentSettings()
+local function snapshotFullSettings()
     return {
         antiAfkEnabled = S.antiAfkEnabled,
         antiVoidEnabled = S.antiVoidEnabled,
         antiFlingEnabled = S.antiFlingEnabled,
-        esp = {
-            Innocent = S.espEnabled.Innocent,
-            Murderer = S.espEnabled.Murderer,
-            Sheriff = S.espEnabled.Sheriff,
-            Hero = S.espEnabled.Hero,
-        },
+        esp = {Innocent = S.espEnabled.Innocent, Murderer = S.espEnabled.Murderer, Sheriff = S.espEnabled.Sheriff, Hero = S.espEnabled.Hero},
         gunESPEnabled = S.gunESPEnabled,
         noclip = S.noclip,
         autoNotifyRoles = S.autoNotifyRoles,
@@ -2707,10 +3419,15 @@ local function snapshotCurrentSettings()
         notifyRoundEnd = S.notifyRoundEnd,
         playerJoinLeaveNotify = S.playerJoinLeaveNotify,
         killSoundOn = S.killSoundOn,
+        dirIndicatorOn = S.dirIndicatorOn,
+        autoHideInRound = S.autoHideInRound,
+        reAnnounceEnabled = S.reAnnounceEnabled,
+        heroChangeNotify = S.heroChangeNotify,
     }
 end
 
-local function applySnapshot(snap)
+local function applyFullSnapshot(snap)
+    if not snap then return end
     if snap.antiAfkEnabled then
         if not S.antiAfkEnabled then
             S.antiAfkEnabled = true
@@ -2782,15 +3499,7 @@ local function applySnapshot(snap)
     end
     if snap.autoNotifyRoles ~= S.autoNotifyRoles then
         S.autoNotifyRoles = snap.autoNotifyRoles
-        if S.autoNotifyRoles then
-            setOn(U.autoNotBtn, U.autoNotInd)
-        else
-            setOff(U.autoNotBtn, U.autoNotInd)
-            lastNotifiedMurderer = nil
-            lastNotifiedSheriff = nil
-            lastNotifiedHero = nil
-            S.pendingNotify = false
-        end
+        if S.autoNotifyRoles then setOn(U.autoNotBtn, U.autoNotInd) else setOff(U.autoNotBtn, U.autoNotInd) end
     end
     if snap.autoKillAll ~= S.autoKillAll then
         S.autoKillAll = snap.autoKillAll
@@ -2837,11 +3546,125 @@ local function applySnapshot(snap)
         S.killSoundOn = snap.killSoundOn
         if S.killSoundOn then setOn(U.killSoundBtn, U.killSoundInd) else setOff(U.killSoundBtn, U.killSoundInd) end
     end
+    if snap.dirIndicatorOn ~= S.dirIndicatorOn then
+        S.dirIndicatorOn = snap.dirIndicatorOn
+        if S.dirIndicatorOn then setOn(U.dirBtn, U.dirInd) else setOff(U.dirBtn, U.dirInd) if DirUI then DirUI.gui.Enabled = false end end
+    end
+    if snap.autoHideInRound ~= S.autoHideInRound then
+        S.autoHideInRound = snap.autoHideInRound
+        if S.autoHideInRound then setOn(U.autoHideBtn, U.autoHideInd) else setOff(U.autoHideBtn, U.autoHideInd) end
+    end
+    if snap.reAnnounceEnabled ~= S.reAnnounceEnabled then
+        S.reAnnounceEnabled = snap.reAnnounceEnabled
+        if S.reAnnounceEnabled then setOn(U.reAnnBtn, U.reAnnInd) else setOff(U.reAnnBtn, U.reAnnInd) end
+    end
+    if snap.heroChangeNotify ~= S.heroChangeNotify then
+        S.heroChangeNotify = snap.heroChangeNotify
+        if S.heroChangeNotify then setOn(U.heroChangeBtn, U.heroChangeInd) else setOff(U.heroChangeBtn, U.heroChangeInd) end
+    end
 end
 
+local function buildConfigSlot(idx)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, mn(32))
+    row.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+    row.BorderSizePixel = 0
+    row.LayoutOrder = getLayoutOrder()
+    row.Parent = currentParent
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = row end
+
+    local nameBox = Instance.new("TextBox")
+    nameBox.Size = UDim2.new(0.4, -mn(4), 1, 0)
+    nameBox.Position = mpos(4, 0)
+    nameBox.BackgroundTransparency = 1
+    nameBox.Text = "Slot " .. idx
+    nameBox.TextColor3 = Color3.fromRGB(230, 230, 235)
+    nameBox.TextSize = mn(11)
+    nameBox.Font = Enum.Font.GothamSemibold
+    nameBox.ClearTextOnFocus = false
+    nameBox.TextXAlignment = Enum.TextXAlignment.Left
+    nameBox.Parent = row
+    do local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 6) p.Parent = nameBox end
+
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Size = msz(50, 24)
+    saveBtn.Position = UDim2.new(0.4, mn(2), 0.5, -mn(12))
+    saveBtn.BackgroundColor3 = Color3.fromRGB(50, 80, 50)
+    saveBtn.Text = "Save"
+    saveBtn.TextColor3 = Color3.fromRGB(220, 240, 220)
+    saveBtn.TextSize = mn(11)
+    saveBtn.Font = Enum.Font.GothamBold
+    saveBtn.BorderSizePixel = 0
+    saveBtn.AutoButtonColor = false
+    saveBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = saveBtn end
+
+    local loadBtn = Instance.new("TextButton")
+    loadBtn.Size = msz(50, 24)
+    loadBtn.Position = UDim2.new(0.4, mn(56), 0.5, -mn(12))
+    loadBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 110)
+    loadBtn.Text = "Load"
+    loadBtn.TextColor3 = Color3.fromRGB(220, 230, 255)
+    loadBtn.TextSize = mn(11)
+    loadBtn.Font = Enum.Font.GothamBold
+    loadBtn.BorderSizePixel = 0
+    loadBtn.AutoButtonColor = false
+    loadBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = loadBtn end
+
+    local delBtn = Instance.new("TextButton")
+    delBtn.Size = msz(30, 24)
+    delBtn.Position = UDim2.new(1, -mn(34), 0.5, -mn(12))
+    delBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40)
+    delBtn.Text = "✕"
+    delBtn.TextColor3 = Color3.fromRGB(255, 210, 210)
+    delBtn.TextSize = mn(12)
+    delBtn.Font = Enum.Font.GothamBold
+    delBtn.BorderSizePixel = 0
+    delBtn.AutoButtonColor = false
+    delBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = delBtn end
+
+    saveBtn.MouseButton1Click:Connect(function()
+        S.savedConfigs[idx] = {name = nameBox.Text, data = snapshotFullSettings()}
+        showToast("Saved: " .. nameBox.Text)
+    end)
+    loadBtn.MouseButton1Click:Connect(function()
+        local slot = S.savedConfigs[idx]
+        if not slot or not slot.data then
+            showToast("Slot " .. idx .. " is empty")
+            return
+        end
+        applyFullSnapshot(slot.data)
+        showToast("Loaded: " .. (slot.name or ("Slot " .. idx)))
+    end)
+    delBtn.MouseButton1Click:Connect(function()
+        S.savedConfigs[idx] = nil
+        showToast("Cleared slot " .. idx)
+    end)
+end
+
+for i = 1, 3 do
+    buildConfigSlot(i)
+end
+
+createSectionTitle("PRESET INFO")
+local pInfo = Instance.new("TextLabel")
+pInfo.Size = UDim2.new(1, 0, 0, mn(120))
+pInfo.BackgroundTransparency = 1
+pInfo.Text = "PVP Ready (Home) turns on a curated set.\nRestore Before PVP reverts to prior settings.\nSaved Configs store your current toggles\nin one of 3 slots (rename them above)."
+pInfo.TextColor3 = Color3.fromRGB(180, 182, 190)
+pInfo.TextSize = mn(11)
+pInfo.Font = Enum.Font.Gotham
+pInfo.TextXAlignment = Enum.TextXAlignment.Left
+pInfo.TextYAlignment = Enum.TextYAlignment.Top
+pInfo.LayoutOrder = getLayoutOrder()
+pInfo.Parent = currentParent
+
+-- Apply PVP preset
 applyPvpPreset = function()
     if not S.pvpSnapshot then
-        S.pvpSnapshot = snapshotCurrentSettings()
+        S.pvpSnapshot = snapshotFullSettings()
     end
     if not S.antiAfkEnabled then
         S.antiAfkEnabled = true
@@ -2907,7 +3730,7 @@ restorePvpSnapshot = function()
         sendNotification("MM2 Menu", "No previous settings to restore", SOUNDS.alert)
         return
     end
-    applySnapshot(S.pvpSnapshot)
+    applyFullSnapshot(S.pvpSnapshot)
     S.pvpSnapshot = nil
     sendNotification("MM2 Menu", "Restored previous settings")
 end
@@ -2952,6 +3775,14 @@ local function roundEvents()
         S.stats.rounds = S.stats.rounds + 1
         S.statsCountedMurderer = false
         S.statsCountedSheriff = false
+        if S.autoHideInRound then
+            if minimizeMenu then pcall(minimizeMenu) end
+        end
+    end
+    if not MurdererName and wasMurderer then
+        if S.autoHideInRound and not S.menuVisible then
+            if showMenu then pcall(showMenu) end
+        end
     end
     if S.notifyRoundStart and MurdererName and MurdererName ~= wasMurderer then
         sendNotification("Round Started", "Murderer: " .. tostring(MurdererName), SOUNDS.round)
@@ -3017,10 +3848,14 @@ local function getRoles()
         S.roundActiveSheriff = false
     end
     if nH and validHolder(nH) then
+        if S.heroChangeNotify and S.lastHero and S.lastHero ~= nH and S.lastHero ~= "None" then
+            sendNotification("New Hero", "Hero changed: " .. tostring(nH))
+        end
         HeroName = nH
     elseif HeroName and not validHolder(HeroName) then
         HeroName = nil
     end
+    if HeroName then S.lastHero = HeroName end
 
     if MurdererName == nil and noMurdererSince and (tick() - noMurdererSince) >= ROUND_END_DEBOUNCE then
         MurdererName = nil
@@ -3036,6 +3871,7 @@ local function getRoles()
         S.pendingNotify = false
         S.selfNotifyMurderer = false
         S.selfNotifySheriff = false
+        S.lastHero = nil
         noMurdererSince = nil
     end
 
@@ -3059,6 +3895,14 @@ local function getRoles()
             lastNotifiedSheriff = SheriffName
             lastNotifiedHero = HeroName
             S.pendingNotify = false
+            notifyAllRoles()
+        end
+    end
+
+    if S.reAnnounceEnabled and MurdererName then
+        local now = tick()
+        if now - S.lastReAnnounceTime >= (S.reAnnounceInterval or 30) then
+            S.lastReAnnounceTime = now
             notifyAllRoles()
         end
     end
@@ -3355,6 +4199,7 @@ local function checkAutoChat()
     end
 end
 
+-- Alarm loop
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     if not S.killerAlarmOn or not MurdererName then
@@ -3382,6 +4227,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- Gun drop alert
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     if not S.gunDropAlert then return end
@@ -3393,6 +4239,7 @@ RunService.Heartbeat:Connect(function()
     S.lastGunDropped = isDropped
 end)
 
+-- Render loop: crosshair, camera follow, direction arrow
 RunService.RenderStepped:Connect(function()
     if S.scriptClosed then return end
     if S.cameraFollowMurderer and MurdererName then
@@ -3422,6 +4269,37 @@ RunService.RenderStepped:Connect(function()
         U.crosshairH.Position = UDim2.fromOffset(cx - CH_LEN / 2, cy - CH_THICK / 2)
         U.crosshairV.Position = UDim2.fromOffset(cx - CH_THICK / 2, cy - CH_LEN / 2)
         U.crosshairDot.Position = UDim2.fromOffset(cx - CH_DOT / 2, cy - CH_DOT / 2)
+    end
+    -- Direction indicator
+    if S.dirIndicatorOn and MurdererName and MurdererName ~= player.Name then
+        local m = Players:FindFirstChild(MurdererName)
+        local me = player.Character
+        local cam = workspace.CurrentCamera
+        if m and m.Character and me and cam then
+            local mRoot = m.Character:FindFirstChild("HumanoidRootPart")
+            local myRoot = me:FindFirstChild("HumanoidRootPart")
+            if mRoot and myRoot then
+                DirUI.gui.Enabled = true
+                DirUI.frame.Visible = true
+                local delta = mRoot.Position - myRoot.Position
+                local camLook = cam.CFrame.LookVector
+                local angle = math.atan2(delta.X, delta.Z) - math.atan2(camLook.X, camLook.Z)
+                -- Position around screen edge or center
+                local vp = cam.ViewportSize
+                local cx = vp.X / 2
+                local cy = vp.Y / 2
+                local radius = math.min(vp.X, vp.Y) * 0.18
+                local ox = math.sin(angle) * radius
+                local oy = -math.cos(angle) * radius
+                DirUI.frame.Position = UDim2.fromOffset(cx + ox - mn(15), cy + oy - mn(15))
+                DirUI.arrow.Rotation = math.deg(angle) + 180
+                DirUI.distLbl.Text = math.floor(delta.Magnitude) .. " st"
+            end
+        else
+            DirUI.frame.Visible = false
+        end
+    else
+        if DirUI then DirUI.frame.Visible = false end
     end
 end)
 
@@ -3511,7 +4389,27 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Player death tracking
+-- FPS / Ping measurement
+task.spawn(function()
+    local frames = 0
+    local last = tick()
+    RunService.RenderStepped:Connect(function()
+        frames = frames + 1
+        if tick() - last >= 1 then
+            S.currentFPS = frames
+            frames = 0
+            last = tick()
+            pcall(function()
+                local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+                S.currentPing = math.floor(ping)
+            end)
+            if PerfUI then
+                PerfUI.label.Text = "FPS: " .. tostring(S.currentFPS) .. " | Ping: " .. tostring(S.currentPing)
+            end
+        end
+    end)
+end)
+
 local function hookPlayerDeath(character)
     local hum = character:WaitForChild("Humanoid", 5)
     if hum then
@@ -3548,7 +4446,198 @@ player.CharacterAdded:Connect(function(character)
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- DRAG / RESIZE
+-- AUTO REJOIN ON KICK
+-- ═══════════════════════════════════════════════════════════
+pcall(function()
+    if hookmetamethod and getnamecallmethod then
+        local originalNamecall
+        originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            if method == "Kick" and self == player then
+                task.spawn(function()
+                    task.wait(0.2)
+                    pcall(function()
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+                    end)
+                end)
+            end
+            return originalNamecall(self, ...)
+        end)
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- TUTORIAL
+-- ═══════════════════════════════════════════════════════════
+local TutorialUI = {}
+TutorialUI.gui = Instance.new("ScreenGui")
+TutorialUI.gui.Name = "MM2Tutorial"
+TutorialUI.gui.ResetOnSpawn = false
+TutorialUI.gui.DisplayOrder = 400
+TutorialUI.gui.IgnoreGuiInset = true
+TutorialUI.gui.Visible = false
+TutorialUI.gui.Parent = playerGui
+
+local tutOverlay = Instance.new("Frame")
+tutOverlay.Size = UDim2.new(1, 0, 1, 0)
+tutOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+tutOverlay.BackgroundTransparency = 0.4
+tutOverlay.BorderSizePixel = 0
+tutOverlay.Parent = TutorialUI.gui
+
+local tutPanel = Instance.new("Frame")
+tutPanel.Size = msz(400, 260)
+tutPanel.Position = UDim2.new(0.5, -mn(200), 0.5, -mn(130))
+tutPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
+tutPanel.BorderSizePixel = 0
+tutPanel.Parent = tutOverlay
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = tutPanel
+    local st = Instance.new("UIStroke")
+    st.Color = Color3.fromRGB(80, 82, 92)
+    st.Thickness = 1
+    st.Parent = tutPanel
+end
+
+local tutTitle = Instance.new("TextLabel")
+tutTitle.Size = UDim2.new(1, -mn(20), 0, mn(30))
+tutTitle.Position = mpos(10, 10)
+tutTitle.BackgroundTransparency = 1
+tutTitle.Text = ""
+tutTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
+tutTitle.TextSize = mn(15)
+tutTitle.Font = Enum.Font.GothamBold
+tutTitle.TextXAlignment = Enum.TextXAlignment.Left
+tutTitle.Parent = tutPanel
+
+local tutBody = Instance.new("TextLabel")
+tutBody.Size = UDim2.new(1, -mn(20), 0, mn(140))
+tutBody.Position = mpos(10, 48)
+tutBody.BackgroundTransparency = 1
+tutBody.Text = ""
+tutBody.TextColor3 = Color3.fromRGB(200, 202, 210)
+tutBody.TextSize = mn(12)
+tutBody.Font = Enum.Font.Gotham
+tutBody.TextXAlignment = Enum.TextXAlignment.Left
+tutBody.TextYAlignment = Enum.TextYAlignment.Top
+tutBody.TextWrapped = true
+tutBody.Parent = tutPanel
+
+local tutStep = Instance.new("TextLabel")
+tutStep.Size = UDim2.new(1, -mn(20), 0, mn(16))
+tutStep.Position = mpos(10, 200)
+tutStep.BackgroundTransparency = 1
+tutStep.Text = ""
+tutStep.TextColor3 = Color3.fromRGB(140, 142, 150)
+tutStep.TextSize = mn(10)
+tutStep.Font = Enum.Font.Gotham
+tutStep.TextXAlignment = Enum.TextXAlignment.Left
+tutStep.Parent = tutPanel
+
+local tutSkip = Instance.new("TextButton")
+tutSkip.Size = msz(90, 30)
+tutSkip.Position = mpos(10, 220)
+tutSkip.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+tutSkip.Text = "Skip"
+tutSkip.TextColor3 = Color3.fromRGB(200, 200, 210)
+tutSkip.TextSize = mn(12)
+tutSkip.Font = Enum.Font.GothamBold
+tutSkip.BorderSizePixel = 0
+tutSkip.AutoButtonColor = false
+tutSkip.Parent = tutPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = tutSkip end
+
+local tutNext = Instance.new("TextButton")
+tutNext.Size = msz(120, 30)
+tutNext.Position = UDim2.new(1, -mn(130), 0, mn(220))
+tutNext.BackgroundColor3 = Color3.fromRGB(60, 90, 140)
+tutNext.Text = "Next"
+tutNext.TextColor3 = Color3.fromRGB(230, 235, 255)
+tutNext.TextSize = mn(12)
+tutNext.Font = Enum.Font.GothamBold
+tutNext.BorderSizePixel = 0
+tutNext.AutoButtonColor = false
+tutNext.Parent = tutPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = tutNext end
+
+local TUTORIAL_PAGES = {
+    {
+        title = "Welcome to MM2 Menu",
+        body = "This is a quick tour of the menu's features.\n\nEvery tab on the left groups related features. Click any tab to switch. The search box at the top right of every tab filters buttons in that tab only.\n\nOn the Home tab you have a search box that searches every tab at once.",
+    },
+    {
+        title = "Home Tab",
+        body = "Home is your dashboard:\n\n• Live Status shows your role, murderer, sheriff, hero, and distance to murderer.\n• Quick Actions: Apply PVP Ready, Restore, Turn Off All, Panic.\n• Session Stats tracks kills, deaths, rounds, and how many times you were Murderer/Sheriff.\n• FPS/Ping overlay toggle pins a small monitor to your screen.\n• Notification History — click any entry to copy it.",
+    },
+    {
+        title = "PVP Ready & Restore",
+        body = "PVP Ready turns on a curated set of features at once: anti-afk, anti-void, anti-fling, all ESPs, gun ESP, noclip, auto notify, auto kill, killer alarm, and more.\n\nRestore Before PVP reverts everything back to how it was before you clicked PVP Ready. Use it if PVP Ready isn't your vibe.",
+    },
+    {
+        title = "Keybinds & Panic",
+        body = "Open the Keybinds tab to set hotkeys for common actions. Click a key button to rebind it.\n\nThe Panic keybind (default End) silently turns everything off and minimizes the menu — no notification sent.\n\nRight Shift minimizes/restores the menu.",
+    },
+    {
+        title = "Saved Configs",
+        body = "The Config tab lets you save your current toggle state into one of three slots. Rename them, save, and load them later.\n\nPVP Ready takes a snapshot before applying, so Restore is always available until you load a different config.",
+    },
+    {
+        title = "Tips",
+        body = "• Hold a sidebar tab for 3 seconds to enter reorder mode.\n• Hover (or long-press on mobile) any toggle for a tooltip.\n• Click a notification to copy its text.\n• Close button asks for confirmation, so you won't close accidentally.\n\nYou can reopen this tutorial any time from the Home tab.",
+    },
+}
+
+local tutIdx = 1
+local function renderTut()
+    local p = TUTORIAL_PAGES[tutIdx]
+    if not p then return end
+    tutTitle.Text = p.title
+    tutBody.Text = p.body
+    tutStep.Text = "Step " .. tutIdx .. " / " .. #TUTORIAL_PAGES
+    tutNext.Text = tutIdx == #TUTORIAL_PAGES and "Finish" or "Next"
+end
+
+showTutorial = function()
+    tutIdx = 1
+    renderTut()
+    TutorialUI.gui.Visible = true
+end
+
+tutSkip.MouseButton1Click:Connect(function()
+    TutorialUI.gui.Visible = false
+end)
+
+tutNext.MouseButton1Click:Connect(function()
+    if tutIdx >= #TUTORIAL_PAGES then
+        TutorialUI.gui.Visible = false
+    else
+        tutIdx = tutIdx + 1
+        renderTut()
+    end
+end)
+
+-- Show tutorial once
+task.spawn(function()
+    task.wait(0.5)
+    local hasSeen = false
+    if isfile and readfile then
+        local ok, _ = pcall(function()
+            if isfile("mm2_menu_tutorial_seen.txt") then hasSeen = true end
+        end)
+        if not hasSeen then
+            pcall(function() writefile("mm2_menu_tutorial_seen.txt", "1") end)
+        end
+    else
+        hasSeen = _G.MM2TutorialSeen == true
+        _G.MM2TutorialSeen = true
+    end
+    if not hasSeen then
+        showTutorial()
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- DRAG / RESIZE / CLOSE
 -- ═══════════════════════════════════════════════════════════
 local dragStart, dragStartPosition, resizeStart, resizeStartSize, reopenDragStart, reopenDragStartPosition
 
@@ -3640,6 +4729,11 @@ local function closeScript()
     sendNotification("MM2 Menu", "Script closed.")
     pcall(function() U.gui:Destroy() end)
     pcall(function() S.crosshairGui:Destroy() end)
+    pcall(function() NotifUI.gui:Destroy() end)
+    pcall(function() TooltipUI.gui:Destroy() end)
+    pcall(function() TutorialUI.gui:Destroy() end)
+    pcall(function() PerfUI.gui:Destroy() end)
+    pcall(function() DirUI.gui:Destroy() end)
 end
 
 U.lock.MouseButton1Click:Connect(function()
@@ -3656,9 +4750,16 @@ U.minimize.MouseButton1Click:Connect(function()
     minimizeMenu()
     sendNotification("MM2 Menu", "Menu minimized. Click 'MM2' or press Right Shift to reopen.")
 end)
-U.close.MouseButton1Click:Connect(closeScript)
+U.close.MouseButton1Click:Connect(function()
+    showCloseConfirm()
+end)
 U.close.MouseEnter:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(180, 55, 55) end)
 U.close.MouseLeave:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(42, 44, 52) end)
+
+ccYes.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+    closeScript()
+end)
 
 -- ═══════════════════════════════════════════════════════════
 -- KEYBIND ACTIONS
@@ -3684,9 +4785,7 @@ kbActions.noclip = function()
         end
     else
         setOff(U.noclipBtn, U.noclipInd)
-        for o, v in pairs(S.originalCollision) do
-            if o and o.Parent then o.CanCollide = v end
-        end
+        for o, v in pairs(S.originalCollision) do if o and o.Parent then o.CanCollide = v end end
         S.originalCollision = {}
     end
 end
@@ -3753,6 +4852,11 @@ kbActions.turnOffAll = function()
     if resetAllToggles then resetAllToggles() end
 end
 
+kbActions.panic = function()
+    silentResetAll()
+    if minimizeMenu then pcall(minimizeMenu) end
+end
+
 -- ═══════════════════════════════════════════════════════════
 -- INPUT HANDLER
 -- ═══════════════════════════════════════════════════════════
@@ -3767,6 +4871,14 @@ UserInputService.InputBegan:Connect(function(i, processed)
     if S.scriptClosed then return end
     if U.whatsNewOverlay.Visible and (i.KeyCode == Enum.KeyCode.Escape) then
         U.whatsNewOverlay.Visible = false
+        return
+    end
+    if TutorialUI.gui.Visible and (i.KeyCode == Enum.KeyCode.Escape) then
+        TutorialUI.gui.Visible = false
+        return
+    end
+    if U.closeConfirm.Visible and (i.KeyCode == Enum.KeyCode.Escape) then
+        U.closeConfirm.Visible = false
         return
     end
     if S.capturingKeybind then
@@ -3810,6 +4922,7 @@ UserInputService.InputEnded:Connect(function(i)
     end
 end)
 
+-- Rainbow loop + tab reorder rainbow
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     local hue = (tick() * RAINBOW_SPEED) % 1
@@ -3823,13 +4936,25 @@ RunService.Heartbeat:Connect(function()
         U.crosshairV.BackgroundColor3 = color
         U.crosshairDot.BackgroundColor3 = Color3.fromHSV((hue + 0.5) % 1, 1, 1)
     end
+    -- Tab reorder rainbow
+    if S.tabReorderState.active and S.tabReorderState.tab then
+        local tb = U.tabs[S.tabReorderState.tab]
+        if tb then
+            local st = tb:FindFirstChild("RainbowStroke")
+            if st then st.Color = color end
+        end
+    end
+    -- Dir indicator color
+    if S.dirIndicatorOn and DirUI then
+        DirUI.arrow.TextColor3 = color
+    end
 end)
 
+-- Init
 getRoles()
 updateHL()
 updateGunESP()
 
--- Initial Home build + auto-show What's New once
 task.defer(function()
     task.wait(1)
     if not S.whatsNewAutoShown then
