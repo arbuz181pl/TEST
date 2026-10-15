@@ -27,16 +27,6 @@ local function mn(n) return math.floor(n * MS + 0.5) end
 local function msz(x, y) return UDim2.fromOffset(mn(x), mn(y)) end
 local function mpos(x, y) return UDim2.fromOffset(mn(x), mn(y)) end
 
--- ECST = European Central Summer Time (UTC+2). Change offset here if needed.
-local ECST_OFFSET = 2 * 3600
-local function getECSTString()
-    local ok, str = pcall(function()
-        return os.date("!%H:%M:%S", os.time() + ECST_OFFSET)
-    end)
-    if ok and str then return str end
-    return "--:--:--"
-end
-
 local S = {
     noclip = false, infinityJump = false, flingOnTouch = false, flingThirdParty = false,
     flyEnabled = false, autoNotifyRoles = false, autoKillAll = false, autoGunTP = false,
@@ -47,6 +37,7 @@ local S = {
     crosshairOn = false, crosshairGui = nil,
     keybindsEnabled = true, scriptClosed = false,
     lastTouchPos = nil, mousePos = nil,
+    activeTouches = {},
     gunDropAlert = false, lastGunDropped = false,
     notifyRoundStart = false, notifyRoundEnd = false,
     playerJoinLeaveNotify = false,
@@ -100,6 +91,7 @@ local lastNotifiedSheriff = nil
 local lastNotifiedHero = nil
 local noMurdererSince = nil
 local ROUND_END_DEBOUNCE = 2.0
+local ROLE_NOTIFY_DELAY = 2.5
 
 local GetPlayerData = nil
 pcall(function() GetPlayerData = ReplicatedStorage:FindFirstChild("GetPlayerData", true) end)
@@ -178,7 +170,7 @@ U.header.Parent = U.frame
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = U.header end
 
 U.title = Instance.new("TextLabel")
-U.title.Size = UDim2.new(1, -mn(235), 1, 0)
+U.title.Size = UDim2.new(1, -mn(120), 1, 0)
 U.title.Position = mpos(10, 0)
 U.title.BackgroundTransparency = 1
 U.title.Text = "MM2 MENU BY ARBUZ v1.2"
@@ -200,29 +192,6 @@ U.titleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 90, 90)),
 })
 U.titleGradient.Parent = U.title
-
--- ECST timestamp label (right-aligned, small, gray)
-U.timeStamp = Instance.new("TextLabel")
-U.timeStamp.Size = mpos(115, 48)
-U.timeStamp.Position = UDim2.new(1, -mn(220), 0, 0)
-U.timeStamp.BackgroundTransparency = 1
-U.timeStamp.Text = "--:--:-- ECST"
-U.timeStamp.TextColor3 = Color3.fromRGB(170, 172, 180)
-U.timeStamp.TextSize = mn(10)
-U.timeStamp.Font = Enum.Font.GothamMedium
-U.timeStamp.TextXAlignment = Enum.TextXAlignment.Right
-U.timeStamp.TextYAlignment = Enum.TextYAlignment.Center
-U.timeStamp.ZIndex = 3
-U.timeStamp.Parent = U.header
-
-task.spawn(function()
-    while U.gui.Parent do
-        pcall(function()
-            U.timeStamp.Text = getECSTString() .. " ECST"
-        end)
-        task.wait(1)
-    end
-end)
 
 U.close = Instance.new("TextButton")
 U.close.Size = msz(30, 30)
@@ -825,12 +794,10 @@ RunService.RenderStepped:Connect(function()
     local cam = workspace.CurrentCamera
     if not r or not cam then return end
     local dir = Vector3.zero
-    -- Keyboard input
     if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
     if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
-    -- Mobile: use humanoid MoveDirection (set by touch joystick)
     if hum and hum.MoveDirection.Magnitude > 0.05 then
         dir = dir + hum.MoveDirection
     end
@@ -1744,6 +1711,10 @@ end)
 
 U.crosshairBtn, U.crosshairInd = createToggle("Crosshair", "Rainbow Crosshair (follows mouse)")
 U.crosshairBtn.MouseButton1Click:Connect(function()
+    if IS_MOBILE then
+        sendNotification("MM2 Menu", "Crosshair is not needed on mobile - your finger is the crosshair. Not available on mobile.", SOUNDS.alert)
+        return
+    end
     S.crosshairOn = not S.crosshairOn
     if S.crosshairOn then
         setOn(U.crosshairBtn, U.crosshairInd)
@@ -1863,7 +1834,14 @@ local function resetAllToggles()
         for p, bg in pairs(S.playerDistBillboards) do if bg then bg:Destroy() end end
         S.playerDistBillboards = {}
     end
-    if S.autoNotifyRoles then S.autoNotifyRoles = false setOff(U.autoNotBtn, U.autoNotInd) end
+    if S.autoNotifyRoles then
+        S.autoNotifyRoles = false
+        setOff(U.autoNotBtn, U.autoNotInd)
+        lastNotifiedMurderer = nil
+        lastNotifiedSheriff = nil
+        lastNotifiedHero = nil
+        S.pendingNotify = false
+    end
     if S.autoSendMurdererChat then
         S.autoSendMurdererChat = false
         setOff(U.autoChatBtn, U.autoChatInd)
@@ -1920,26 +1898,29 @@ U.turnOffBtn.MouseButton1Click:Connect(resetAllToggles)
 -- ============================================================
 -- CROSSHAIR
 -- ============================================================
+local CH_LEN = math.max(3, mn(20))
+local CH_THICK = math.max(2, mn(2))
+local CH_DOT = math.max(3, mn(3))
+
 S.crosshairGui = Instance.new("ScreenGui")
 S.crosshairGui.Name = "MM2Crosshair"
 S.crosshairGui.ResetOnSpawn = false
-S.crosshairGui.IgnoreGuiInset = true
 S.crosshairGui.DisplayOrder = 200
 S.crosshairGui.Enabled = false
 S.crosshairGui.Parent = playerGui
 do
     U.crosshairH = Instance.new("Frame")
-    U.crosshairH.Size = msz(20, 2)
+    U.crosshairH.Size = UDim2.fromOffset(CH_LEN, CH_THICK)
     U.crosshairH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairH.BorderSizePixel = 0
     U.crosshairH.Parent = S.crosshairGui
     U.crosshairV = Instance.new("Frame")
-    U.crosshairV.Size = msz(2, 20)
+    U.crosshairV.Size = UDim2.fromOffset(CH_THICK, CH_LEN)
     U.crosshairV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairV.BorderSizePixel = 0
     U.crosshairV.Parent = S.crosshairGui
     U.crosshairDot = Instance.new("Frame")
-    U.crosshairDot.Size = msz(3, 3)
+    U.crosshairDot.Size = UDim2.fromOffset(CH_DOT, CH_DOT)
     U.crosshairDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairDot.BorderSizePixel = 0
     U.crosshairDot.Parent = S.crosshairGui
@@ -1998,7 +1979,7 @@ local function applyPvpPreset()
         S.lastAlarmDist = math.huge
         setOn(U.killerAlarmBtn, U.killerAlarmInd)
     end
-    if not S.crosshairOn then
+    if not IS_MOBILE and not S.crosshairOn then
         S.crosshairOn = true
         setOn(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = true end
@@ -2058,7 +2039,8 @@ local function validHolder(n)
     if not t.Character then return false end
     local h = t.Character:FindFirstChildOfClass("Humanoid")
     if not h or h.Health <= 0 then return false end
-    if isPlayerInSpawn(t) then return false end
+    -- Don't exclude the local player even if they're in spawn (fixes user's own role not showing)
+    if t ~= player and isPlayerInSpawn(t) then return false end
     return true
 end
 
@@ -2115,16 +2097,14 @@ local function getRoles()
         noMurdererSince = nil
     elseif MurdererName and not validHolder(MurdererName) then
         MurdererName = nil
-        lastNotifiedMurderer = nil
         S.lastChatSentMurderer = nil
         S.roundActive = false
-        noMurdererSince = tick()
+        if not noMurdererSince then noMurdererSince = tick() end
     end
     if nS and validHolder(nS) then
         SheriffName = nS
     elseif SheriffName and not validHolder(SheriffName) then
         SheriffName = nil
-        lastNotifiedSheriff = nil
         S.lastChatSentSheriff = nil
         S.roundActiveSheriff = false
     end
@@ -2132,7 +2112,6 @@ local function getRoles()
         HeroName = nH
     elseif HeroName and not validHolder(HeroName) then
         HeroName = nil
-        lastNotifiedHero = nil
     end
 
     if MurdererName == nil and noMurdererSince and (tick() - noMurdererSince) >= ROUND_END_DEBOUNCE then
@@ -2152,18 +2131,17 @@ local function getRoles()
 
     roundEvents()
 
-    if S.autoNotifyRoles and MurdererName then
-        if MurdererName ~= lastNotifiedMurderer then
-            if not S.pendingNotify then
-                S.pendingNotify = true
-                S.pendingNotifySince = tick()
-            elseif tick() - S.pendingNotifySince >= 1.5 then
-                lastNotifiedMurderer = MurdererName
-                lastNotifiedSheriff = SheriffName
-                lastNotifiedHero = HeroName
-                S.pendingNotify = false
-                notifyAllRoles()
-            end
+    -- Auto notify: wait a delay to let ALL roles be detected before firing
+    if S.autoNotifyRoles and MurdererName and MurdererName ~= lastNotifiedMurderer then
+        if not S.pendingNotify then
+            S.pendingNotify = true
+            S.pendingNotifySince = tick()
+        elseif tick() - S.pendingNotifySince >= ROLE_NOTIFY_DELAY then
+            lastNotifiedMurderer = MurdererName
+            lastNotifiedSheriff = SheriffName
+            lastNotifiedHero = HeroName
+            S.pendingNotify = false
+            notifyAllRoles()
         end
     end
 end
@@ -2488,32 +2466,55 @@ RunService.RenderStepped:Connect(function()
     end
     if S.crosshairOn then
         local cx, cy
-        if UserInputService.MouseEnabled and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+        if UserInputService.TouchEnabled and S.lastTouchPos then
+            cx = S.lastTouchPos.X
+            cy = S.lastTouchPos.Y
+        elseif UserInputService.MouseEnabled then
             local loc = UserInputService:GetMouseLocation()
             cx = loc.X
             cy = loc.Y
-        elseif UserInputService.TouchEnabled and S.lastTouchPos then
-            cx = S.lastTouchPos.X
-            cy = S.lastTouchPos.Y
         else
             local vp = workspace.CurrentCamera.ViewportSize
             cx = vp.X / 2
             cy = vp.Y / 2
         end
-        U.crosshairH.Position = UDim2.fromOffset(cx - mn(10), cy - mn(1))
-        U.crosshairV.Position = UDim2.fromOffset(cx - mn(1), cy - mn(10))
-        U.crosshairDot.Position = UDim2.fromOffset(cx - mn(1.5), cy - mn(1.5))
+        U.crosshairH.Position = UDim2.fromOffset(cx - CH_LEN / 2, cy - CH_THICK / 2)
+        U.crosshairV.Position = UDim2.fromOffset(cx - CH_THICK / 2, cy - CH_LEN / 2)
+        U.crosshairDot.Position = UDim2.fromOffset(cx - CH_DOT / 2, cy - CH_DOT / 2)
     end
 end)
 
+-- Multi-touch tracking: pick the touch on the right side of the screen (avoid the joystick)
+local function refreshLastTouch()
+    local bestPos = nil
+    local bestX = -math.huge
+    for _, pos in pairs(S.activeTouches) do
+        if pos.X > bestX then
+            bestX = pos.X
+            bestPos = pos
+        end
+    end
+    if bestPos then S.lastTouchPos = bestPos end
+end
+
 UserInputService.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.Touch then
-        S.lastTouchPos = i.Position
+        S.activeTouches[i] = i.Position
+        refreshLastTouch()
     end
 end)
 UserInputService.InputChanged:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.Touch then
-        S.lastTouchPos = i.Position
+        if S.activeTouches[i] ~= nil then
+            S.activeTouches[i] = i.Position
+            refreshLastTouch()
+        end
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.Touch then
+        S.activeTouches[i] = nil
+        refreshLastTouch()
     end
 end)
 
