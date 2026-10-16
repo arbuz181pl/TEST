@@ -1,4 +1,4 @@
---// MM2 MENU BY ARBUZ v1.2.2
+--// MM2 MENU BY ARBUZ v1.2.3
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,15 +12,22 @@ local LocalizationService = game:GetService("LocalizationService")
 local RAINBOW_SPEED = 0.25
 local ALARM_TIME_COOLDOWN = 6
 local ALARM_DIST_STEP = 5
-local SCRIPT_VERSION = "v1.2.2"
+local SCRIPT_VERSION = "v1.2.3"
 local SCRIPT_AUTHOR = "Arbuz"
 
 local CHANGELOG = {
-    version = "v1.2.2",
+    version = "v1.2.3",
     date = "2026-10-16",
     changes = {
-        "Reverted to v1.2.1 stable base",
-        "Added search-all-tabs box on Home tab",
+        "Added auto re-announce roles every 30s (Notifier)",
+        "Added hero change detector (Notifier)",
+        "Added auto-hide UI when round starts (Notifier)",
+        "Added distance to murderer on Home status",
+        "Added silent panic keybind (default End)",
+        "Added close script confirmation",
+        "Added click-to-copy on notification history",
+        "Added 3 saved config slots (Config tab)",
+        "All Tier 1 features - zero camera/metamethod interference",
     },
 }
 
@@ -94,11 +101,21 @@ local S = {
     stats = { kills = 0, deaths = 0, rounds = 0, asMurderer = 0, asSheriff = 0 },
     statsCountedMurderer = false, statsCountedSheriff = false,
     whatsNewAutoShown = false, homeRebuildDirty = true,
+    -- ─── Tier 1 additions ───
+    reAnnounceEnabled = false,
+    reAnnounceInterval = 30,
+    lastReAnnounceTime = 0,
+    lastHero = nil,
+    heroChangeNotify = false,
+    autoHideInRound = false,
+    savedConfigs = {},
+    silentMode = false,
     keybinds = {
         fly = Enum.KeyCode.LeftAlt, noclip = Enum.KeyCode.N, speedhack = Enum.KeyCode.Q,
         infinityJump = Enum.KeyCode.J, autoKillAll = Enum.KeyCode.K, gunESP = Enum.KeyCode.G,
         murdererESP = Enum.KeyCode.M, sheriffESP = Enum.KeyCode.H, innocentESP = Enum.KeyCode.I,
         antiVoid = Enum.KeyCode.B, turnOffAll = Enum.KeyCode.Y,
+        panic = Enum.KeyCode.End,
     },
     keybindList = {
         {id = "fly", name = "Toggle Fly"}, {id = "noclip", name = "Toggle Noclip"},
@@ -107,6 +124,7 @@ local S = {
         {id = "murdererESP", name = "Toggle Murderer ESP"}, {id = "sheriffESP", name = "Toggle Sheriff ESP"},
         {id = "innocentESP", name = "Toggle Innocent ESP"}, {id = "antiVoid", name = "Toggle Anti Void"},
         {id = "turnOffAll", name = "Turn Off All"},
+        {id = "panic", name = "Panic (silent off + minimize)"},
     },
 }
 
@@ -145,6 +163,8 @@ local restorePvpSnapshot
 local minimizeMenu
 local showMenu
 local openWhatsNew
+local showCloseConfirm
+local updateHomeUI
 
 local function playSound(id, baseVol, isKill)
     baseVol = baseVol or 1
@@ -160,6 +180,7 @@ local function playSound(id, baseVol, isKill)
 end
 
 local function sendNotification(title, text, soundId)
+    if S.silentMode then return end
     pcall(function() StarterGui:SetCore("SendNotification", {Title=title, Text=text, Duration=5}) end)
     table.insert(S.notificationHistory, 1, {title = title, text = text, time = tick()})
     while #S.notificationHistory > 10 do
@@ -730,6 +751,98 @@ U.whatsNewOverlay.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
+-- CLOSE CONFIRMATION MODAL (Tier 1)
+-- ============================================================
+U.closeConfirm = Instance.new("TextButton")
+U.closeConfirm.Name = "CloseConfirmOverlay"
+U.closeConfirm.Size = UDim2.new(1, 0, 1, 0)
+U.closeConfirm.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+U.closeConfirm.BackgroundTransparency = 0.5
+U.closeConfirm.Text = ""
+U.closeConfirm.AutoButtonColor = false
+U.closeConfirm.Visible = false
+U.closeConfirm.ZIndex = 130
+U.closeConfirm.Parent = U.gui
+
+local ccPanel = Instance.new("Frame")
+ccPanel.Size = msz(280, 130)
+ccPanel.Position = UDim2.new(0.5, -mn(140), 0.5, -mn(65))
+ccPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
+ccPanel.BorderSizePixel = 0
+ccPanel.Active = true
+ccPanel.ZIndex = 131
+ccPanel.Parent = U.closeConfirm
+do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = ccPanel
+    local st = Instance.new("UIStroke")
+    st.Color = Color3.fromRGB(80, 82, 92)
+    st.Thickness = 1
+    st.Parent = ccPanel
+end
+
+local ccTitle = Instance.new("TextLabel")
+ccTitle.Size = UDim2.new(1, 0, 0, mn(30))
+ccTitle.Position = mpos(0, 10)
+ccTitle.BackgroundTransparency = 1
+ccTitle.Text = "Close Script?"
+ccTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
+ccTitle.TextSize = mn(14)
+ccTitle.Font = Enum.Font.GothamBold
+ccTitle.ZIndex = 132
+ccTitle.Parent = ccPanel
+
+local ccBody = Instance.new("TextLabel")
+ccBody.Size = UDim2.new(1, -mn(20), 0, mn(30))
+ccBody.Position = mpos(10, 42)
+ccBody.BackgroundTransparency = 1
+ccBody.Text = "Are you sure? All active features will be turned off."
+ccBody.TextColor3 = Color3.fromRGB(180, 182, 190)
+ccBody.TextSize = mn(11)
+ccBody.Font = Enum.Font.Gotham
+ccBody.TextWrapped = true
+ccBody.ZIndex = 132
+ccBody.Parent = ccPanel
+
+local ccYes = Instance.new("TextButton")
+ccYes.Size = msz(120, 32)
+ccYes.Position = mpos(14, 86)
+ccYes.BackgroundColor3 = Color3.fromRGB(120, 35, 35)
+ccYes.Text = "Close"
+ccYes.TextColor3 = Color3.fromRGB(255, 210, 210)
+ccYes.TextSize = mn(12)
+ccYes.Font = Enum.Font.GothamBold
+ccYes.BorderSizePixel = 0
+ccYes.AutoButtonColor = false
+ccYes.ZIndex = 132
+ccYes.Parent = ccPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccYes end
+
+local ccNo = Instance.new("TextButton")
+ccNo.Size = msz(120, 32)
+ccNo.Position = UDim2.new(1, -mn(134), 0, mn(86))
+ccNo.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+ccNo.Text = "Cancel"
+ccNo.TextColor3 = Color3.fromRGB(230, 230, 235)
+ccNo.TextSize = mn(12)
+ccNo.Font = Enum.Font.GothamBold
+ccNo.BorderSizePixel = 0
+ccNo.AutoButtonColor = false
+ccNo.ZIndex = 132
+ccNo.Parent = ccPanel
+do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccNo end
+
+showCloseConfirm = function()
+    U.closeConfirm.Visible = true
+end
+
+U.closeConfirm.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+end)
+ccNo.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+end)
+
+-- ============================================================
 -- HOME TAB
 -- ============================================================
 currentParent = U.tabFrames.Home
@@ -741,7 +854,7 @@ U.whatsNewBtn.MouseButton1Click:Connect(function()
     openWhatsNew()
 end)
 
--- ─── NEW: SEARCH ALL TABS ─────────────────────────────────
+-- Cross-tab search on Home
 createSectionTitle("SEARCH ALL TABS")
 
 local homeSearchBox = Instance.new("TextBox")
@@ -835,7 +948,6 @@ homeSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
         e.Parent = homeSearchResults
     end
 end)
--- ─── END SEARCH ALL TABS ─────────────────────────────────
 
 createSectionTitle("LIVE STATUS")
 do
@@ -846,6 +958,7 @@ do
     U.homeRefs.heroLbl = addInfoRow(card, "Hero", "None")
     U.homeRefs.roundLbl = addInfoRow(card, "Round", "Waiting")
     U.homeRefs.playersLbl = addInfoRow(card, "Players", "0 / 0")
+    U.homeRefs.murdDistLbl = addInfoRow(card, "Distance to Murderer", "-", ROLE_COLORS.Murderer)
 end
 
 createSectionTitle("QUICK ACTIONS")
@@ -868,11 +981,13 @@ U.homeTurnOffBtn.MouseButton1Click:Connect(function()
     if resetAllToggles then resetAllToggles() end
 end)
 
-U.homePanicBtn = createActionButton("HomePanicBtn", "⚠  PANIC  (off + minimize)")
+U.homePanicBtn = createActionButton("HomePanicBtn", "⚠  PANIC  (silent off + minimize)")
 U.homePanicBtn.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
 U.homePanicBtn.TextColor3 = Color3.fromRGB(255, 220, 220)
 U.homePanicBtn.MouseButton1Click:Connect(function()
+    S.silentMode = true
     if resetAllToggles then pcall(resetAllToggles) end
+    S.silentMode = false
     if minimizeMenu then pcall(minimizeMenu) end
 end)
 
@@ -917,7 +1032,7 @@ U.copyLsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-createSectionTitle("NOTIFICATION HISTORY")
+createSectionTitle("NOTIFICATION HISTORY (click to copy)")
 U.homeRefs.notifCard = Instance.new("Frame")
 U.homeRefs.notifCard.Size = UDim2.new(1, 0, 0, mn(120))
 U.homeRefs.notifCard.BackgroundColor3 = Color3.fromRGB(28, 30, 36)
@@ -1001,7 +1116,7 @@ end
 local function rebuildNotifHistory()
     if not U.homeRefs.notifScroll then return end
     for _, child in ipairs(U.homeRefs.notifScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
+        if child:IsA("Frame") or child:IsA("TextLabel") or child:IsA("TextButton") then child:Destroy() end
     end
     if #S.notificationHistory == 0 then
         local empty = Instance.new("TextLabel")
@@ -1017,10 +1132,12 @@ local function rebuildNotifHistory()
         return
     end
     for _, notif in ipairs(S.notificationHistory) do
-        local frame = Instance.new("Frame")
+        local frame = Instance.new("TextButton")
         frame.Size = UDim2.new(1, 0, 0, mn(30))
         frame.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
         frame.BorderSizePixel = 0
+        frame.Text = ""
+        frame.AutoButtonColor = false
         frame.LayoutOrder = getLayoutOrder()
         frame.Parent = U.homeRefs.notifScroll
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = frame end
@@ -1055,10 +1172,26 @@ local function rebuildNotifHistory()
         ago.Font = Enum.Font.Gotham
         ago.TextXAlignment = Enum.TextXAlignment.Right
         ago.Parent = frame
+        local notifTitle = notif.title
+        local notifText = notif.text
+        frame.MouseButton1Click:Connect(function()
+            local ok = pcall(function() setclipboard(notifTitle .. "\n" .. notifText) end)
+            if ok then
+                local oldSilent = S.silentMode
+                S.silentMode = false
+                -- temporarily allow toast
+                if StarterGui then
+                    pcall(function()
+                        StarterGui:SetCore("SendNotification", {Title = "MM2 Menu", Text = "Copied notification", Duration = 2})
+                    end)
+                end
+                S.silentMode = oldSilent
+            end
+        end)
     end
 end
 
-local function updateHomeUI(rebuildLists)
+updateHomeUI = function(rebuildLists)
     if not U.homeRefs.yourRoleLbl then return end
     local yourRole = "Innocent"
     if MurdererName == player.Name then yourRole = "Murderer"
@@ -1079,6 +1212,25 @@ local function updateHomeUI(rebuildLists)
     local total = #Players:GetPlayers()
     local maxP = Players.MaxPlayers or 0
     U.homeRefs.playersLbl.Text = tostring(total) .. " / " .. tostring(maxP)
+
+    -- Distance to murderer
+    if MurdererName and MurdererName ~= player.Name then
+        local me = player.Character
+        local m = Players:FindFirstChild(MurdererName)
+        if me and m and m.Character then
+            local myRoot = me:FindFirstChild("HumanoidRootPart")
+            local mRoot = m.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot and mRoot then
+                U.homeRefs.murdDistLbl.Text = tostring(math.floor((myRoot.Position - mRoot.Position).Magnitude)) .. " studs"
+            else
+                U.homeRefs.murdDistLbl.Text = "-"
+            end
+        else
+            U.homeRefs.murdDistLbl.Text = "-"
+        end
+    else
+        U.homeRefs.murdDistLbl.Text = MurdererName == player.Name and "You" or "-"
+    end
 
     U.homeRefs.killsLbl.Text = tostring(S.stats.kills)
     U.homeRefs.deathsLbl.Text = tostring(S.stats.deaths)
@@ -1661,6 +1813,25 @@ U.autoNotBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- ─── Tier 1: Re-announce every 30s ───
+U.reAnnBtn, U.reAnnInd = createToggle("ReAnnounce", "Re-announce Roles Every 30s")
+U.reAnnBtn.MouseButton1Click:Connect(function()
+    S.reAnnounceEnabled = not S.reAnnounceEnabled
+    if S.reAnnounceEnabled then
+        setOn(U.reAnnBtn, U.reAnnInd)
+        S.lastReAnnounceTime = 0
+    else
+        setOff(U.reAnnBtn, U.reAnnInd)
+    end
+end)
+
+-- ─── Tier 1: Hero change notify ───
+U.heroChangeBtn, U.heroChangeInd = createToggle("HeroChangeNotify", "Notify When Hero Changes")
+U.heroChangeBtn.MouseButton1Click:Connect(function()
+    S.heroChangeNotify = not S.heroChangeNotify
+    if S.heroChangeNotify then setOn(U.heroChangeBtn, U.heroChangeInd) else setOff(U.heroChangeBtn, U.heroChangeInd) end
+end)
+
 createSectionTitle("ROUND EVENTS")
 
 U.rStartBtn, U.rStartInd = createToggle("NotifyRoundStart", "Notify Round Start")
@@ -1679,6 +1850,13 @@ U.plBtn, U.plInd = createToggle("PlayerJoinLeaveNotify", "Player Join/Leave Aler
 U.plBtn.MouseButton1Click:Connect(function()
     S.playerJoinLeaveNotify = not S.playerJoinLeaveNotify
     if S.playerJoinLeaveNotify then setOn(U.plBtn, U.plInd) else setOff(U.plBtn, U.plInd) end
+end)
+
+-- ─── Tier 1: Auto-hide in round ───
+U.autoHideBtn, U.autoHideInd = createToggle("AutoHideInRound", "Auto-hide UI When Round Starts")
+U.autoHideBtn.MouseButton1Click:Connect(function()
+    S.autoHideInRound = not S.autoHideInRound
+    if S.autoHideInRound then setOn(U.autoHideBtn, U.autoHideInd) else setOff(U.autoHideBtn, U.autoHideInd) end
 end)
 
 createSectionTitle("CHAT ANNOUNCEMENTS")
@@ -2601,6 +2779,9 @@ resetAllToggles = function()
         lastNotifiedHero = nil
         S.pendingNotify = false
     end
+    if S.reAnnounceEnabled then S.reAnnounceEnabled = false setOff(U.reAnnBtn, U.reAnnInd) end
+    if S.heroChangeNotify then S.heroChangeNotify = false setOff(U.heroChangeBtn, U.heroChangeInd) end
+    if S.autoHideInRound then S.autoHideInRound = false setOff(U.autoHideBtn, U.autoHideInd) end
     if S.autoSendMurdererChat then
         S.autoSendMurdererChat = false
         setOff(U.autoChatBtn, U.autoChatInd)
@@ -2690,11 +2871,255 @@ U.allNotifyBtn.MouseButton1Click:Connect(function()
     sendNotification("MM2 Menu", "All notifications enabled")
 end)
 
+-- ─── Tier 1: Saved Configs ───
+createSectionTitle("SAVED CONFIGS (3 slots)")
+
+local function snapshotSettings()
+    return {
+        antiAfkEnabled = S.antiAfkEnabled,
+        antiVoidEnabled = S.antiVoidEnabled,
+        antiFlingEnabled = S.antiFlingEnabled,
+        esp = {
+            Innocent = S.espEnabled.Innocent,
+            Murderer = S.espEnabled.Murderer,
+            Sheriff = S.espEnabled.Sheriff,
+            Hero = S.espEnabled.Hero,
+        },
+        gunESPEnabled = S.gunESPEnabled,
+        noclip = S.noclip,
+        autoNotifyRoles = S.autoNotifyRoles,
+        autoKillAll = S.autoKillAll,
+        killerAlarmOn = S.killerAlarmOn,
+        crosshairOn = S.crosshairOn,
+        gunDropAlert = S.gunDropAlert,
+        notifyRoundStart = S.notifyRoundStart,
+        notifyRoundEnd = S.notifyRoundEnd,
+        playerJoinLeaveNotify = S.playerJoinLeaveNotify,
+        killSoundOn = S.killSoundOn,
+        reAnnounceEnabled = S.reAnnounceEnabled,
+        heroChangeNotify = S.heroChangeNotify,
+        autoHideInRound = S.autoHideInRound,
+    }
+end
+
+local function applySettings(snap)
+    if not snap then return end
+    if snap.antiAfkEnabled then
+        if not S.antiAfkEnabled then
+            S.antiAfkEnabled = true
+            setOn(U.afkBtn, U.afkInd)
+            if S.antiAfkConn then S.antiAfkConn:Disconnect() end
+            S.antiAfkConn = player.Idled:Connect(function()
+                local VU = game:GetService("VirtualUser")
+                VU:CaptureController()
+                VU:ClickButton2(Vector2.new())
+            end)
+        end
+    else
+        if S.antiAfkEnabled then
+            S.antiAfkEnabled = false
+            setOff(U.afkBtn, U.afkInd)
+            if S.antiAfkConn then S.antiAfkConn:Disconnect() S.antiAfkConn = nil end
+        end
+    end
+    if snap.antiVoidEnabled ~= S.antiVoidEnabled then
+        S.antiVoidEnabled = snap.antiVoidEnabled
+        if S.antiVoidEnabled then setOn(U.avBtn, U.avInd) else setOff(U.avBtn, U.avInd) end
+    end
+    if snap.antiFlingEnabled ~= S.antiFlingEnabled then
+        S.antiFlingEnabled = snap.antiFlingEnabled
+        if S.antiFlingEnabled then setOn(U.afBtn, U.afInd) else setOff(U.afBtn, U.afInd) end
+    end
+    for role, state in pairs(snap.esp or {}) do
+        S.espEnabled[role] = state
+        if espButtons[role] then
+            if state then
+                espButtons[role].Button.BackgroundColor3 = ROLE_COLORS[role]:Lerp(Color3.fromRGB(20, 20, 25), 0.65)
+                espButtons[role].Indicator.BackgroundColor3 = ROLE_COLORS[role]
+            else
+                setOff(espButtons[role].Button, espButtons[role].Indicator)
+            end
+        end
+    end
+    if snap.gunESPEnabled ~= S.gunESPEnabled then
+        S.gunESPEnabled = snap.gunESPEnabled
+        if S.gunESPEnabled then
+            U.gunBtn.BackgroundColor3 = GUN_COLOR:Lerp(Color3.fromRGB(20, 20, 25), 0.65)
+            U.gunInd.BackgroundColor3 = GUN_COLOR
+        else
+            setOff(U.gunBtn, U.gunInd)
+            for g, hl in pairs(S.gunHighlights) do if hl then pcall(function() hl:Destroy() end) end end
+            S.gunHighlights = {}
+        end
+    end
+    if snap.noclip ~= S.noclip then
+        S.noclip = snap.noclip
+        if S.noclip then
+            setOn(U.noclipBtn, U.noclipInd)
+            S.originalCollision = {}
+            if player.Character then
+                for _, o in ipairs(player.Character:GetDescendants()) do
+                    if o:IsA("BasePart") then
+                        S.originalCollision[o] = o.CanCollide
+                        o.CanCollide = false
+                    end
+                end
+            end
+        else
+            setOff(U.noclipBtn, U.noclipInd)
+            for o, v in pairs(S.originalCollision) do if o and o.Parent then o.CanCollide = v end end
+            S.originalCollision = {}
+        end
+    end
+    if snap.autoNotifyRoles ~= S.autoNotifyRoles then
+        S.autoNotifyRoles = snap.autoNotifyRoles
+        if S.autoNotifyRoles then setOn(U.autoNotBtn, U.autoNotInd) else setOff(U.autoNotBtn, U.autoNotInd) end
+    end
+    if snap.autoKillAll ~= S.autoKillAll then
+        S.autoKillAll = snap.autoKillAll
+        if S.autoKillAll then setOn(U.autoKillBtn, U.autoKillInd) else setOff(U.autoKillBtn, U.autoKillInd) end
+    end
+    if snap.killerAlarmOn ~= S.killerAlarmOn then
+        S.killerAlarmOn = snap.killerAlarmOn
+        if S.killerAlarmOn then
+            setOn(U.killerAlarmBtn, U.killerAlarmInd)
+            S.lastAlarmDist = math.huge S.lastAlarmTime = 0
+        else
+            setOff(U.killerAlarmBtn, U.killerAlarmInd)
+            S.lastAlarmDist = math.huge
+        end
+    end
+    if snap.crosshairOn ~= S.crosshairOn then
+        S.crosshairOn = snap.crosshairOn
+        if S.crosshairOn then
+            setOn(U.crosshairBtn, U.crosshairInd)
+            if S.crosshairGui then S.crosshairGui.Enabled = true end
+        else
+            setOff(U.crosshairBtn, U.crosshairInd)
+            if S.crosshairGui then S.crosshairGui.Enabled = false end
+        end
+    end
+    if snap.gunDropAlert ~= S.gunDropAlert then
+        S.gunDropAlert = snap.gunDropAlert
+        if S.gunDropAlert then setOn(U.gunAlertBtn, U.gunAlertInd) else setOff(U.gunAlertBtn, U.gunAlertInd) end
+    end
+    if snap.notifyRoundStart ~= S.notifyRoundStart then
+        S.notifyRoundStart = snap.notifyRoundStart
+        if S.notifyRoundStart then setOn(U.rStartBtn, U.rStartInd) else setOff(U.rStartBtn, U.rStartInd) end
+    end
+    if snap.notifyRoundEnd ~= S.notifyRoundEnd then
+        S.notifyRoundEnd = snap.notifyRoundEnd
+        if S.notifyRoundEnd then setOn(U.rEndBtn, U.rEndInd) else setOff(U.rEndBtn, U.rEndInd) end
+    end
+    if snap.playerJoinLeaveNotify ~= S.playerJoinLeaveNotify then
+        S.playerJoinLeaveNotify = snap.playerJoinLeaveNotify
+        if S.playerJoinLeaveNotify then setOn(U.plBtn, U.plInd) else setOff(U.plBtn, U.plInd) end
+    end
+    if snap.killSoundOn ~= S.killSoundOn then
+        S.killSoundOn = snap.killSoundOn
+        if S.killSoundOn then setOn(U.killSoundBtn, U.killSoundInd) else setOff(U.killSoundBtn, U.killSoundInd) end
+    end
+    if snap.reAnnounceEnabled ~= S.reAnnounceEnabled then
+        S.reAnnounceEnabled = snap.reAnnounceEnabled
+        if S.reAnnounceEnabled then setOn(U.reAnnBtn, U.reAnnInd) else setOff(U.reAnnBtn, U.reAnnInd) end
+    end
+    if snap.heroChangeNotify ~= S.heroChangeNotify then
+        S.heroChangeNotify = snap.heroChangeNotify
+        if S.heroChangeNotify then setOn(U.heroChangeBtn, U.heroChangeInd) else setOff(U.heroChangeBtn, U.heroChangeInd) end
+    end
+    if snap.autoHideInRound ~= S.autoHideInRound then
+        S.autoHideInRound = snap.autoHideInRound
+        if S.autoHideInRound then setOn(U.autoHideBtn, U.autoHideInd) else setOff(U.autoHideBtn, U.autoHideInd) end
+    end
+end
+
+local function buildConfigSlot(idx)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, mn(32))
+    row.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+    row.BorderSizePixel = 0
+    row.LayoutOrder = getLayoutOrder()
+    row.Parent = currentParent
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = row end
+
+    local nameBox = Instance.new("TextBox")
+    nameBox.Size = UDim2.new(0.4, -mn(4), 1, 0)
+    nameBox.Position = mpos(4, 0)
+    nameBox.BackgroundTransparency = 1
+    nameBox.Text = "Slot " .. idx
+    nameBox.TextColor3 = Color3.fromRGB(230, 230, 235)
+    nameBox.TextSize = mn(11)
+    nameBox.Font = Enum.Font.GothamSemibold
+    nameBox.ClearTextOnFocus = false
+    nameBox.TextXAlignment = Enum.TextXAlignment.Left
+    nameBox.Parent = row
+    do local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 6) p.Parent = nameBox end
+
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Size = msz(50, 24)
+    saveBtn.Position = UDim2.new(0.4, mn(2), 0.5, -mn(12))
+    saveBtn.BackgroundColor3 = Color3.fromRGB(50, 80, 50)
+    saveBtn.Text = "Save"
+    saveBtn.TextColor3 = Color3.fromRGB(220, 240, 220)
+    saveBtn.TextSize = mn(11)
+    saveBtn.Font = Enum.Font.GothamBold
+    saveBtn.BorderSizePixel = 0
+    saveBtn.AutoButtonColor = false
+    saveBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = saveBtn end
+
+    local loadBtn = Instance.new("TextButton")
+    loadBtn.Size = msz(50, 24)
+    loadBtn.Position = UDim2.new(0.4, mn(56), 0.5, -mn(12))
+    loadBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 110)
+    loadBtn.Text = "Load"
+    loadBtn.TextColor3 = Color3.fromRGB(220, 230, 255)
+    loadBtn.TextSize = mn(11)
+    loadBtn.Font = Enum.Font.GothamBold
+    loadBtn.BorderSizePixel = 0
+    loadBtn.AutoButtonColor = false
+    loadBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = loadBtn end
+
+    local delBtn = Instance.new("TextButton")
+    delBtn.Size = msz(30, 24)
+    delBtn.Position = UDim2.new(1, -mn(34), 0.5, -mn(12))
+    delBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40)
+    delBtn.Text = "X"
+    delBtn.TextColor3 = Color3.fromRGB(255, 210, 210)
+    delBtn.TextSize = mn(12)
+    delBtn.Font = Enum.Font.GothamBold
+    delBtn.BorderSizePixel = 0
+    delBtn.AutoButtonColor = false
+    delBtn.Parent = row
+    do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = delBtn end
+
+    saveBtn.MouseButton1Click:Connect(function()
+        S.savedConfigs[idx] = {name = nameBox.Text, data = snapshotSettings()}
+        sendNotification("MM2 Menu", "Saved: " .. nameBox.Text)
+    end)
+    loadBtn.MouseButton1Click:Connect(function()
+        local slot = S.savedConfigs[idx]
+        if not slot or not slot.data then
+            sendNotification("MM2 Menu", "Slot " .. idx .. " is empty", SOUNDS.alert)
+            return
+        end
+        applySettings(slot.data)
+        sendNotification("MM2 Menu", "Loaded: " .. (slot.name or ("Slot " .. idx)))
+    end)
+    delBtn.MouseButton1Click:Connect(function()
+        S.savedConfigs[idx] = nil
+        sendNotification("MM2 Menu", "Cleared slot " .. idx)
+    end)
+end
+
+for i = 1, 3 do buildConfigSlot(i) end
+
 createSectionTitle("PRESET INFO")
 local pInfo = Instance.new("TextLabel")
 pInfo.Size = UDim2.new(1, 0, 0, mn(180))
 pInfo.BackgroundTransparency = 1
-pInfo.Text = "PVP Ready (Home tab) turns ON:\n- Anti AFK, Anti Void, Anti Fling\n- All 4 ESPs + Gun ESP\n- Noclip\n- Auto Notify Round\n- Auto Kill All\n- Killer Alarm (30 studs)\n- Rainbow Crosshair (PC only)\n- Gun Drop Alert\n- Round Start / End Notify\n- Player Join/Leave Alerts\n- Kill Sound\n\nRestore (Home tab) reverts to\nsettings from before PVP Ready."
+pInfo.Text = "PVP Ready (Home tab) turns ON:\n- Anti AFK, Anti Void, Anti Fling\n- All 4 ESPs + Gun ESP\n- Noclip\n- Auto Notify Round\n- Auto Kill All\n- Killer Alarm (30 studs)\n- Rainbow Crosshair (PC only)\n- Gun Drop Alert\n- Round Start / End Notify\n- Player Join/Leave Alerts\n- Kill Sound\n\nRestore (Home tab) reverts to\nsettings from before PVP Ready.\nSaved configs let you save/load your\ncurrent toggle state into 3 slots."
 pInfo.TextColor3 = Color3.fromRGB(180, 182, 190)
 pInfo.TextSize = mn(11)
 pInfo.Font = Enum.Font.Gotham
@@ -2970,6 +3395,14 @@ local function roundEvents()
         S.stats.rounds = S.stats.rounds + 1
         S.statsCountedMurderer = false
         S.statsCountedSheriff = false
+        if S.autoHideInRound then
+            if minimizeMenu then pcall(minimizeMenu) end
+        end
+    end
+    if not MurdererName and wasMurderer then
+        if S.autoHideInRound and not S.menuVisible then
+            if showMenu then pcall(showMenu) end
+        end
     end
     if S.notifyRoundStart and MurdererName and MurdererName ~= wasMurderer then
         sendNotification("Round Started", "Murderer: " .. tostring(MurdererName), SOUNDS.round)
@@ -3035,10 +3468,15 @@ local function getRoles()
         S.roundActiveSheriff = false
     end
     if nH and validHolder(nH) then
+        -- Tier 1: hero change detect
+        if S.heroChangeNotify and S.lastHero and S.lastHero ~= nH then
+            sendNotification("New Hero", "Hero changed: " .. tostring(nH))
+        end
         HeroName = nH
     elseif HeroName and not validHolder(HeroName) then
         HeroName = nil
     end
+    if HeroName then S.lastHero = HeroName end
 
     if MurdererName == nil and noMurdererSince and (tick() - noMurdererSince) >= ROUND_END_DEBOUNCE then
         MurdererName = nil
@@ -3054,6 +3492,7 @@ local function getRoles()
         S.pendingNotify = false
         S.selfNotifyMurderer = false
         S.selfNotifySheriff = false
+        S.lastHero = nil
         noMurdererSince = nil
     end
 
@@ -3077,6 +3516,15 @@ local function getRoles()
             lastNotifiedSheriff = SheriffName
             lastNotifiedHero = HeroName
             S.pendingNotify = false
+            notifyAllRoles()
+        end
+    end
+
+    -- Tier 1: re-announce every 30s
+    if S.reAnnounceEnabled and MurdererName then
+        local now = tick()
+        if now - (S.lastReAnnounceTime or 0) >= (S.reAnnounceInterval or 30) then
+            S.lastReAnnounceTime = now
             notifyAllRoles()
         end
     end
@@ -3673,9 +4121,16 @@ U.minimize.MouseButton1Click:Connect(function()
     minimizeMenu()
     sendNotification("MM2 Menu", "Menu minimized. Click 'MM2' or press Right Shift to reopen.")
 end)
-U.close.MouseButton1Click:Connect(closeScript)
+U.close.MouseButton1Click:Connect(function()
+    showCloseConfirm()
+end)
 U.close.MouseEnter:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(180, 55, 55) end)
 U.close.MouseLeave:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(42, 44, 52) end)
+
+ccYes.MouseButton1Click:Connect(function()
+    U.closeConfirm.Visible = false
+    closeScript()
+end)
 
 -- ============================================================
 -- KEYBIND ACTIONS
@@ -3770,6 +4225,14 @@ kbActions.turnOffAll = function()
     if resetAllToggles then resetAllToggles() end
 end
 
+-- Tier 1: silent panic
+kbActions.panic = function()
+    S.silentMode = true
+    if resetAllToggles then pcall(resetAllToggles) end
+    S.silentMode = false
+    if minimizeMenu then pcall(minimizeMenu) end
+end
+
 -- ============================================================
 -- INPUT HANDLER
 -- ============================================================
@@ -3784,6 +4247,10 @@ UserInputService.InputBegan:Connect(function(i, processed)
     if S.scriptClosed then return end
     if U.whatsNewOverlay.Visible and (i.KeyCode == Enum.KeyCode.Escape) then
         U.whatsNewOverlay.Visible = false
+        return
+    end
+    if U.closeConfirm.Visible and (i.KeyCode == Enum.KeyCode.Escape) then
+        U.closeConfirm.Visible = false
         return
     end
     if S.capturingKeybind then
