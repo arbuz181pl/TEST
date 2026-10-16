@@ -29,6 +29,8 @@ local CHANGELOG = {
         "Speedhack now survives round end / respawn",
         "Gun Drop Alert & Killer Alarm included in PVP Ready",
         "Fling toggles auto-disable Anti Fling",
+        "Crosshair now follows mouse and hides default cursor",
+        "Fly speed doubles when Shift is held",
     },
 }
 
@@ -1558,7 +1560,14 @@ RunService.RenderStepped:Connect(function()
     end
     if UserInputService:IsKeyDown(Enum.KeyCode.Space) or flyUpFlag == 1 then dir = dir + Vector3.new(0, 1, 0) end
     if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or flyDownFlag == -1 then dir = dir - Vector3.new(0, 1, 0) end
-    if dir.Magnitude > 0 then flyBV.Velocity = dir.Unit * S.flySpeed else flyBV.Velocity = Vector3.zero end
+    
+    -- FLY SPEED BOOST: Double speed when Shift is held
+    local speed = S.flySpeed
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
+        speed = speed * 2
+    end
+    
+    if dir.Magnitude > 0 then flyBV.Velocity = dir.Unit * speed else flyBV.Velocity = Vector3.zero end
     flyBG.CFrame = cam.CFrame
 end)
 
@@ -2696,9 +2705,11 @@ U.crosshairBtn.MouseButton1Click:Connect(function()
     if S.crosshairOn then
         setOn(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = true end
+        UserInputService.MouseIconEnabled = false
     else
         setOff(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = false end
+        UserInputService.MouseIconEnabled = true
     end
 end)
 
@@ -2846,6 +2857,7 @@ resetAllToggles = function()
         S.crosshairOn = false
         setOff(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = false end
+        UserInputService.MouseIconEnabled = true
     end
     if S.gunDropAlert then S.gunDropAlert = false setOff(U.gunAlertBtn, U.gunAlertInd) end
     if S.killerTrailOn then S.killerTrailOn = false setOff(U.killerTrailBtn, U.killerTrailInd) end
@@ -2868,6 +2880,7 @@ local CH_DOT = math.max(3, mn(3))
 S.crosshairGui = Instance.new("ScreenGui")
 S.crosshairGui.Name = "MM2Crosshair"
 S.crosshairGui.ResetOnSpawn = false
+S.crosshairGui.IgnoreGuiInset = true
 S.crosshairGui.DisplayOrder = 200
 S.crosshairGui.Enabled = false
 S.crosshairGui.Parent = playerGui
@@ -3057,9 +3070,11 @@ local function applySettings(snap)
         if S.crosshairOn then
             setOn(U.crosshairBtn, U.crosshairInd)
             if S.crosshairGui then S.crosshairGui.Enabled = true end
+            UserInputService.MouseIconEnabled = false
         else
             setOff(U.crosshairBtn, U.crosshairInd)
             if S.crosshairGui then S.crosshairGui.Enabled = false end
+            UserInputService.MouseIconEnabled = true
         end
     end
     if snap.gunDropAlert ~= S.gunDropAlert then
@@ -3318,9 +3333,11 @@ local function applySnapshot(snap)
         if S.crosshairOn then
             setOn(U.crosshairBtn, U.crosshairInd)
             if S.crosshairGui then S.crosshairGui.Enabled = true end
+            UserInputService.MouseIconEnabled = false
         else
             setOff(U.crosshairBtn, U.crosshairInd)
             if S.crosshairGui then S.crosshairGui.Enabled = false end
+            UserInputService.MouseIconEnabled = true
         end
     end
     if snap.gunDropAlert ~= S.gunDropAlert then
@@ -3403,6 +3420,7 @@ applyPvpPreset = function()
         S.crosshairOn = true
         setOn(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = true end
+        UserInputService.MouseIconEnabled = false
     end
     -- Notifications like Round Start/End are deliberately NOT enabled here.
     sendNotification("MM2 Menu", "PVP Ready applied")
@@ -3935,10 +3953,7 @@ RunService.RenderStepped:Connect(function()
     end
     if S.crosshairOn then
         local cx, cy
-        if UserInputService.TouchEnabled and S.lastTouchPos then
-            cx = S.lastTouchPos.X
-            cy = S.lastTouchPos.Y
-        elseif UserInputService.MouseEnabled then
+        if UserInputService.MouseEnabled then
             local loc = UserInputService:GetMouseLocation()
             cx = loc.X
             cy = loc.Y
@@ -4192,6 +4207,7 @@ local function closeScript()
     sendNotification("MM2 Menu", "Script closed.")
     pcall(function() U.gui:Destroy() end)
     pcall(function() S.crosshairGui:Destroy() end)
+    UserInputService.MouseIconEnabled = true
 end
 
 U.lock.MouseButton1Click:Connect(function()
