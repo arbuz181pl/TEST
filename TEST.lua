@@ -1,4 +1,4 @@
---// MM2 MENU BY ARBUZ v1.4.0
+--// MM2 MENU BY ARBUZ v1.4.1
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,21 +14,19 @@ local Stats = game:GetService("Stats")
 local RAINBOW_SPEED = 0.25
 local ALARM_TIME_COOLDOWN = 6
 local ALARM_DIST_STEP = 5
-local SCRIPT_VERSION = "v1.4.0"
+local SCRIPT_VERSION = "v1.4.1"
 local SCRIPT_AUTHOR = "Arbuz"
 
 local CHANGELOG = {
-    version = "v1.4.0",
+    version = "v1.4.1",
     date = "2026-10-16",
     changes = {
-        "Fixed notifications persisting on screen (removed custom GUI, back to stable default)",
-        "Fixed menu freezing / can't move (added proper yields in main loop)",
-        "Fixed session duration + region not updating (non-blocking region fetch)",
-        "Tutorial now blocks menu clicks when open",
-        "Search bar now searches ALL tabs (moved to top bar)",
-        "Removed search-current-tab from Home tab",
-        "Restored lock icon",
-        "Dedicated drag handle for reliable menu movement",
+        "Fixed Session Duration showing 00:00:00 (was using os.clock + tick mismatch)",
+        "Fixed menu unresponsive on mobile (removed Active=true on main frame)",
+        "Fixed character frozen (force PlatformStand=false on load + character add)",
+        "Tutorial no longer auto-shows on mobile",
+        "Removed invisible text button overlays that could capture input",
+        "All modals properly gated behind Enabled/Visible flags",
     },
 }
 
@@ -103,7 +101,6 @@ local S = {
     compactMode = false, fpsOverlayOn = false,
     currentFPS = 60, currentPing = 0,
     savedConfigs = {},
-    regionCached = nil,
     tabOrder = {"Home", "Movement", "ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Keybinds", "Settings", "Utility", "Config"},
     keybinds = {
         fly = Enum.KeyCode.LeftAlt, noclip = Enum.KeyCode.N, speedhack = Enum.KeyCode.Q,
@@ -159,7 +156,6 @@ local setOn, setOff, setRed
 local notifyAllRoles, sendChat, getRoleMessage, fmtRole
 local snapshotFullSettings, applyFullSnapshot
 local killAllPlayers, attackTarget
-local refreshCrossSearch
 
 local function getLayoutOrder()
     currentLayoutOrder = currentLayoutOrder + 1
@@ -167,7 +163,32 @@ local function getLayoutOrder()
 end
 
 -- ═══════════════════════════════════════════════════════════
--- NOTIFICATIONS (STABLE - default Roblox, no custom GUI)
+-- DEFENSIVE: Reset character state on load
+-- ═══════════════════════════════════════════════════════════
+local function forceResetCharacter()
+    local c = player.Character
+    if not c then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if h then
+        h.PlatformStand = false
+        h.Sit = false
+    end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        -- Don't reset CFrame; only clear velocity
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+forceResetCharacter()
+player.CharacterAdded:Connect(function()
+    task.wait(0.3)
+    forceResetCharacter()
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- NOTIFICATIONS (stable, default Roblox)
 -- ═══════════════════════════════════════════════════════════
 local function playSound(id, baseVol, isKill)
     baseVol = baseVol or 1
@@ -239,6 +260,7 @@ U.gui.Name = "MM2MenuByArbuz"
 U.gui.ResetOnSpawn = false
 U.gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 U.gui.DisplayOrder = 100
+U.gui.Enabled = true
 U.gui.Parent = playerGui
 
 U.canvas = Instance.new("CanvasGroup")
@@ -254,7 +276,8 @@ U.frame.Size = msz(460, 380)
 U.frame.Position = UDim2.new(0.5, -mn(230), 0.5, -mn(190))
 U.frame.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 U.frame.BorderSizePixel = 0
-U.frame.Active = true
+-- NOTE: Do NOT set Active=true on mobile - it can swallow touch input
+U.frame.Active = false
 U.frame.Parent = U.canvas
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = U.frame
@@ -269,16 +292,17 @@ U.header.Name = "Header"
 U.header.Size = UDim2.new(1, 0, 0, mn(44))
 U.header.BackgroundColor3 = Color3.fromRGB(29, 30, 37)
 U.header.BorderSizePixel = 0
-U.header.Active = true
+U.header.Active = false
 U.header.Parent = U.frame
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = U.header end
 
--- Drag handle (separate, on top of header but under buttons)
+-- Drag handle: use ImageButton so it doesn't capture as a text button
 U.dragHandle = Instance.new("TextButton")
 U.dragHandle.Size = UDim2.new(1, -mn(110), 1, 0)
 U.dragHandle.BackgroundTransparency = 1
 U.dragHandle.Text = ""
 U.dragHandle.AutoButtonColor = false
+U.dragHandle.Active = true
 U.dragHandle.ZIndex = 3
 U.dragHandle.Parent = U.header
 
@@ -316,6 +340,7 @@ local function makeHeaderBtn(text, xOff, textColor)
     b.Font = Enum.Font.GothamBold
     b.BorderSizePixel = 0
     b.AutoButtonColor = false
+    b.Active = true
     b.ZIndex = 10
     b.Parent = U.header
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = b
@@ -336,6 +361,7 @@ U.resize.TextColor3 = Color3.fromRGB(180, 182, 190)
 U.resize.TextSize = mn(12)
 U.resize.Font = Enum.Font.GothamBold
 U.resize.AutoButtonColor = false
+U.resize.Active = true
 U.resize.ZIndex = 30
 U.resize.Parent = U.frame
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 4) c.Parent = U.resize end
@@ -351,6 +377,7 @@ U.reopen.TextSize = mn(13)
 U.reopen.Font = Enum.Font.GothamBold
 U.reopen.AutoButtonColor = false
 U.reopen.Visible = false
+U.reopen.Active = true
 U.reopen.ZIndex = 50
 U.reopen.Parent = U.gui
 do
@@ -397,6 +424,7 @@ U.searchBox.TextSize = mn(12)
 U.searchBox.Font = Enum.Font.GothamSemibold
 U.searchBox.ClearTextOnFocus = false
 U.searchBox.TextXAlignment = Enum.TextXAlignment.Left
+U.searchBox.Active = true
 U.searchBox.Parent = U.rightArea
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.searchBox
@@ -450,6 +478,7 @@ createToggle = function(name, text)
     b.TextSize = mn(12)
     b.Font = Enum.Font.GothamSemibold
     b.AutoButtonColor = false
+    b.Active = true
     b.LayoutOrder = getLayoutOrder()
     b.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = b end
@@ -474,6 +503,7 @@ createActionButton = function(name, text)
     b.TextSize = mn(12)
     b.Font = Enum.Font.GothamSemibold
     b.AutoButtonColor = false
+    b.Active = true
     b.LayoutOrder = getLayoutOrder()
     b.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = b end
@@ -486,6 +516,7 @@ createInfoCard = function()
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.BackgroundColor3 = Color3.fromRGB(28, 30, 36)
     card.BorderSizePixel = 0
+    card.Active = false
     card.LayoutOrder = getLayoutOrder()
     card.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = card end
@@ -502,6 +533,7 @@ addInfoRow = function(card, key, initial, valueColor)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, mn(16))
     row.BackgroundTransparency = 1
+    row.Active = false
     row.LayoutOrder = getLayoutOrder()
     row.Parent = card
     local k = Instance.new("TextLabel")
@@ -563,6 +595,7 @@ buildSidebarButtons = function()
         tb.TextSize = mn(11)
         tb.Font = Enum.Font.GothamSemibold
         tb.AutoButtonColor = false
+        tb.Active = true
         tb.TextXAlignment = Enum.TextXAlignment.Left
         tb.LayoutOrder = idx
         tb.Parent = U.sidebar
@@ -600,7 +633,7 @@ buildSidebarButtons()
 switchTab("Home")
 
 -- Search across ALL tabs
-refreshCrossSearch = function()
+U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     local q = U.searchBox.Text:lower()
     for _, ch in ipairs(U.searchResults:GetChildren()) do
         if ch:IsA("TextButton") or ch:IsA("TextLabel") then ch:Destroy() end
@@ -631,6 +664,7 @@ refreshCrossSearch = function()
                     o.TextSize = mn(11)
                     o.Font = Enum.Font.GothamSemibold
                     o.AutoButtonColor = false
+                    o.Active = true
                     o.TextXAlignment = Enum.TextXAlignment.Left
                     o.LayoutOrder = count
                     o.Parent = U.searchResults
@@ -658,9 +692,7 @@ refreshCrossSearch = function()
         e.LayoutOrder = 999
         e.Parent = U.searchResults
     end
-end
-
-U.searchBox:GetPropertyChangedSignal("Text"):Connect(refreshCrossSearch)
+end)
 
 -- ═══════════════════════════════════════════════════════════
 -- TAB CONTENT
@@ -671,6 +703,7 @@ local function populateHome()
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, mn(30))
     row.BackgroundTransparency = 1
+    row.Active = false
     row.LayoutOrder = getLayoutOrder()
     row.Parent = currentParent
     do
@@ -780,6 +813,7 @@ local function populateHome()
     U.homeRefs.notifCard.Size = UDim2.new(1, 0, 0, mn(120))
     U.homeRefs.notifCard.BackgroundColor3 = Color3.fromRGB(28, 30, 36)
     U.homeRefs.notifCard.BorderSizePixel = 0
+    U.homeRefs.notifCard.Active = false
     U.homeRefs.notifCard.LayoutOrder = getLayoutOrder()
     U.homeRefs.notifCard.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.homeRefs.notifCard end
@@ -832,6 +866,7 @@ local function populateMovement()
     FP.panel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
     FP.panel.BorderSizePixel = 0
     FP.panel.Visible = false
+    FP.panel.Active = false
     FP.panel.ZIndex = 20
     FP.panel.Parent = U.gui
     do
@@ -845,7 +880,7 @@ local function populateMovement()
     fh.Size = UDim2.new(1, 0, 0, mn(42))
     fh.BackgroundColor3 = Color3.fromRGB(29, 30, 37)
     fh.BorderSizePixel = 0
-    fh.Active = true
+    fh.Active = false
     fh.ZIndex = 21
     fh.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = fh end
@@ -871,6 +906,7 @@ local function populateMovement()
     flk.Font = Enum.Font.GothamBold
     flk.BorderSizePixel = 0
     flk.AutoButtonColor = false
+    flk.Active = true
     flk.ZIndex = 22
     flk.Parent = fh
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = flk end
@@ -885,6 +921,7 @@ local function populateMovement()
     fen.TextSize = mn(13)
     fen.Font = Enum.Font.GothamSemibold
     fen.AutoButtonColor = false
+    fen.Active = true
     fen.ZIndex = 21
     fen.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = fen end
@@ -920,6 +957,7 @@ local function populateMovement()
     fm.TextSize = mn(18)
     fm.Font = Enum.Font.GothamBold
     fm.AutoButtonColor = false
+    fm.Active = true
     fm.ZIndex = 21
     fm.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = fm end
@@ -934,6 +972,7 @@ local function populateMovement()
     fsb.TextSize = mn(12)
     fsb.Font = Enum.Font.GothamSemibold
     fsb.ClearTextOnFocus = false
+    fsb.Active = true
     fsb.ZIndex = 21
     fsb.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = fsb end
@@ -948,6 +987,7 @@ local function populateMovement()
     fp.TextSize = mn(18)
     fp.Font = Enum.Font.GothamBold
     fp.AutoButtonColor = false
+    fp.Active = true
     fp.ZIndex = 21
     fp.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = fp end
@@ -962,6 +1002,7 @@ local function populateMovement()
     fu.TextSize = mn(12)
     fu.Font = Enum.Font.GothamBold
     fu.AutoButtonColor = false
+    fu.Active = true
     fu.ZIndex = 21
     fu.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = fu end
@@ -976,6 +1017,7 @@ local function populateMovement()
     fd.TextSize = mn(12)
     fd.Font = Enum.Font.GothamBold
     fd.AutoButtonColor = false
+    fd.Active = true
     fd.ZIndex = 21
     fd.Parent = FP.panel
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = fd end
@@ -1170,6 +1212,7 @@ local function populateMovement()
     local shRow = Instance.new("Frame")
     shRow.Size = UDim2.new(1, 0, 0, mn(30))
     shRow.BackgroundTransparency = 1
+    shRow.Active = false
     shRow.LayoutOrder = getLayoutOrder()
     shRow.Parent = currentParent
 
@@ -1182,6 +1225,7 @@ local function populateMovement()
     shMinus.TextSize = mn(18)
     shMinus.Font = Enum.Font.GothamBold
     shMinus.AutoButtonColor = false
+    shMinus.Active = true
     shMinus.Parent = shRow
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = shMinus end
 
@@ -1195,6 +1239,7 @@ local function populateMovement()
     shBox.TextSize = mn(12)
     shBox.Font = Enum.Font.GothamSemibold
     shBox.ClearTextOnFocus = false
+    shBox.Active = true
     shBox.Parent = shRow
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = shBox end
 
@@ -1208,6 +1253,7 @@ local function populateMovement()
     shPlus.TextSize = mn(18)
     shPlus.Font = Enum.Font.GothamBold
     shPlus.AutoButtonColor = false
+    shPlus.Active = true
     shPlus.Parent = shRow
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = shPlus end
 
@@ -1493,6 +1539,7 @@ local function populateTeleport()
     pDrop.TextSize = mn(12)
     pDrop.Font = Enum.Font.GothamSemibold
     pDrop.AutoButtonColor = false
+    pDrop.Active = true
     pDrop.LayoutOrder = getLayoutOrder()
     pDrop.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = pDrop end
@@ -1529,6 +1576,7 @@ local function populateTeleport()
                 o.TextSize = mn(12)
                 o.Font = Enum.Font.GothamSemibold
                 o.AutoButtonColor = false
+                o.Active = true
                 o.Parent = pList
                 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = o end
                 o.MouseButton1Click:Connect(function()
@@ -1669,6 +1717,7 @@ local function populateKeybinds()
         row.Size = UDim2.new(1, 0, 0, mn(30))
         row.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
         row.BorderSizePixel = 0
+        row.Active = false
         row.LayoutOrder = getLayoutOrder()
         row.Parent = currentParent
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = row end
@@ -1692,6 +1741,7 @@ local function populateKeybinds()
         kb.TextSize = mn(11)
         kb.Font = Enum.Font.GothamBold
         kb.AutoButtonColor = false
+        kb.Active = true
         kb.Parent = row
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = kb end
         U.keyButtons[entry.id] = kb
@@ -1735,6 +1785,7 @@ local function populateSettings()
     opSlider.BorderSizePixel = 0
     opSlider.Text = ""
     opSlider.AutoButtonColor = false
+    opSlider.Active = true
     opSlider.LayoutOrder = getLayoutOrder()
     opSlider.Parent = currentParent
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = opSlider end
@@ -1742,6 +1793,7 @@ local function populateSettings()
     opFill.Size = UDim2.new(1, 0, 1, 0)
     opFill.BackgroundColor3 = Color3.fromRGB(60, 130, 80)
     opFill.BorderSizePixel = 0
+    opFill.Active = false
     opFill.Parent = opSlider
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = opFill end
     local opHandle = Instance.new("Frame")
@@ -1750,6 +1802,7 @@ local function populateSettings()
     opHandle.BackgroundColor3 = Color3.fromRGB(220, 220, 230)
     opHandle.BorderSizePixel = 0
     opHandle.ZIndex = 2
+    opHandle.Active = false
     opHandle.Parent = opSlider
     do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(1, 0) c.Parent = opHandle end
 
@@ -1798,6 +1851,7 @@ local function populateSettings()
         sl.BorderSizePixel = 0
         sl.Text = ""
         sl.AutoButtonColor = false
+        sl.Active = true
         sl.LayoutOrder = getLayoutOrder()
         sl.Parent = currentParent
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = sl end
@@ -1805,6 +1859,7 @@ local function populateSettings()
         fill.Size = UDim2.new(1, 0, 1, 0)
         fill.BackgroundColor3 = color
         fill.BorderSizePixel = 0
+        fill.Active = false
         fill.Parent = sl
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = fill end
         local handle = Instance.new("Frame")
@@ -1813,6 +1868,7 @@ local function populateSettings()
         handle.BackgroundColor3 = Color3.fromRGB(220, 220, 230)
         handle.BorderSizePixel = 0
         handle.ZIndex = 2
+        handle.Active = false
         handle.Parent = sl
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(1, 0) c.Parent = handle end
         local dragging = false
@@ -2124,6 +2180,7 @@ local function populateConfig()
         row.Size = UDim2.new(1, 0, 0, mn(32))
         row.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
         row.BorderSizePixel = 0
+        row.Active = false
         row.LayoutOrder = getLayoutOrder()
         row.Parent = currentParent
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = row end
@@ -2136,6 +2193,7 @@ local function populateConfig()
         nameBox.TextSize = mn(11)
         nameBox.Font = Enum.Font.GothamSemibold
         nameBox.ClearTextOnFocus = false
+        nameBox.Active = true
         nameBox.TextXAlignment = Enum.TextXAlignment.Left
         nameBox.Parent = row
         do local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 6) p.Parent = nameBox end
@@ -2149,6 +2207,7 @@ local function populateConfig()
         saveBtn.Font = Enum.Font.GothamBold
         saveBtn.BorderSizePixel = 0
         saveBtn.AutoButtonColor = false
+        saveBtn.Active = true
         saveBtn.Parent = row
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = saveBtn end
         local loadBtn = Instance.new("TextButton")
@@ -2161,6 +2220,7 @@ local function populateConfig()
         loadBtn.Font = Enum.Font.GothamBold
         loadBtn.BorderSizePixel = 0
         loadBtn.AutoButtonColor = false
+        loadBtn.Active = true
         loadBtn.Parent = row
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = loadBtn end
         local delBtn = Instance.new("TextButton")
@@ -2173,6 +2233,7 @@ local function populateConfig()
         delBtn.Font = Enum.Font.GothamBold
         delBtn.BorderSizePixel = 0
         delBtn.AutoButtonColor = false
+        delBtn.Active = true
         delBtn.Parent = row
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = delBtn end
         saveBtn.MouseButton1Click:Connect(function()
@@ -2228,6 +2289,7 @@ U.whatsNewOverlay.BackgroundTransparency = 0.5
 U.whatsNewOverlay.Text = ""
 U.whatsNewOverlay.AutoButtonColor = false
 U.whatsNewOverlay.Visible = false
+U.whatsNewOverlay.Active = true
 U.whatsNewOverlay.ZIndex = 100
 U.whatsNewOverlay.Parent = U.gui
 
@@ -2236,7 +2298,7 @@ wnPanel.Size = msz(360, 340)
 wnPanel.Position = UDim2.new(0.5, -mn(180), 0.5, -mn(170))
 wnPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 wnPanel.BorderSizePixel = 0
-wnPanel.Active = true
+wnPanel.Active = false
 wnPanel.ZIndex = 101
 wnPanel.Parent = U.whatsNewOverlay
 do
@@ -2247,6 +2309,7 @@ local wnHdr = Instance.new("Frame")
 wnHdr.Size = UDim2.new(1, 0, 0, mn(36))
 wnHdr.BackgroundColor3 = Color3.fromRGB(29, 30, 37)
 wnHdr.BorderSizePixel = 0
+wnHdr.Active = false
 wnHdr.ZIndex = 102
 wnHdr.Parent = wnPanel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = wnHdr end
@@ -2271,6 +2334,7 @@ wnClose.TextColor3 = Color3.fromRGB(255, 200, 200)
 wnClose.Font = Enum.Font.GothamBold
 wnClose.BorderSizePixel = 0
 wnClose.AutoButtonColor = false
+wnClose.Active = true
 wnClose.ZIndex = 103
 wnClose.Parent = wnHdr
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = wnClose end
@@ -2333,6 +2397,7 @@ U.closeConfirm.BackgroundTransparency = 0.5
 U.closeConfirm.Text = ""
 U.closeConfirm.AutoButtonColor = false
 U.closeConfirm.Visible = false
+U.closeConfirm.Active = true
 U.closeConfirm.ZIndex = 120
 U.closeConfirm.Parent = U.gui
 local ccPanel = Instance.new("Frame")
@@ -2340,6 +2405,7 @@ ccPanel.Size = msz(280, 130)
 ccPanel.Position = UDim2.new(0.5, -mn(140), 0.5, -mn(65))
 ccPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 ccPanel.BorderSizePixel = 0
+ccPanel.Active = false
 ccPanel.ZIndex = 121
 ccPanel.Parent = U.closeConfirm
 do
@@ -2377,6 +2443,7 @@ ccYes.TextSize = mn(12)
 ccYes.Font = Enum.Font.GothamBold
 ccYes.BorderSizePixel = 0
 ccYes.AutoButtonColor = false
+ccYes.Active = true
 ccYes.ZIndex = 122
 ccYes.Parent = ccPanel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccYes end
@@ -2390,6 +2457,7 @@ ccNo.TextSize = mn(12)
 ccNo.Font = Enum.Font.GothamBold
 ccNo.BorderSizePixel = 0
 ccNo.AutoButtonColor = false
+ccNo.Active = true
 ccNo.ZIndex = 122
 ccNo.Parent = ccPanel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = ccNo end
@@ -2397,7 +2465,7 @@ showCloseConfirm = function() U.closeConfirm.Visible = true end
 U.closeConfirm.MouseButton1Click:Connect(function() U.closeConfirm.Visible = false end)
 ccNo.MouseButton1Click:Connect(function() U.closeConfirm.Visible = false end)
 
--- Tutorial (blocks input via Active frame)
+-- Tutorial (only shown on demand, never auto)
 TutorialUI = {}
 TutorialUI.gui = Instance.new("ScreenGui")
 TutorialUI.gui.Name = "MM2Tutorial"
@@ -2412,12 +2480,14 @@ tutOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 tutOverlay.BackgroundTransparency = 0.4
 tutOverlay.Text = ""
 tutOverlay.AutoButtonColor = false
+tutOverlay.Active = true
 tutOverlay.Parent = TutorialUI.gui
 local tutPanel = Instance.new("Frame")
 tutPanel.Size = msz(400, 260)
 tutPanel.Position = UDim2.new(0.5, -mn(200), 0.5, -mn(130))
 tutPanel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 tutPanel.BorderSizePixel = 0
+tutPanel.Active = false
 tutPanel.Parent = tutOverlay
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 12) c.Parent = tutPanel
@@ -2462,6 +2532,7 @@ tutSkip.TextSize = mn(12)
 tutSkip.Font = Enum.Font.GothamBold
 tutSkip.BorderSizePixel = 0
 tutSkip.AutoButtonColor = false
+tutSkip.Active = true
 tutSkip.Parent = tutPanel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = tutSkip end
 local tutNext = Instance.new("TextButton")
@@ -2474,15 +2545,16 @@ tutNext.TextSize = mn(12)
 tutNext.Font = Enum.Font.GothamBold
 tutNext.BorderSizePixel = 0
 tutNext.AutoButtonColor = false
+tutNext.Active = true
 tutNext.Parent = tutPanel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = tutNext end
 local TUTORIAL_PAGES = {
-    {title = "Welcome", body = "Every tab on the left groups related features.\n\nThe top search box searches EVERY tab at once. Type in it and matching buttons from every tab will appear; click any result to jump to that tab.\n\nRight Shift minimizes/restores the menu."},
-    {title = "Home Tab", body = "Home is your dashboard:\n\n- Live Status: your role, murderer, sheriff, hero, distance.\n- Quick Actions: PVP Ready, Restore, Turn Off All, Panic.\n- Session Stats: kills, deaths, rounds, times as Murderer/Sheriff.\n- FPS/Ping overlay toggle.\n- Notification History (click to copy)."},
-    {title = "PVP Ready & Restore", body = "PVP Ready turns on a curated set of features at once: anti-afk, anti-void, anti-fling, all ESPs, gun ESP, noclip, auto notify, auto kill, killer alarm, and more.\n\nRestore Before PVP reverts everything back to how it was before you clicked PVP Ready."},
-    {title = "Keybinds & Panic", body = "Open the Keybinds tab to set hotkeys for common actions.\n\nThe Panic keybind (default End) silently turns everything off and minimizes the menu - no notification.\n\nRight Shift minimizes/restores the menu."},
-    {title = "Saved Configs", body = "The Config tab lets you save your current toggle state into one of 3 slots. Rename them, save, and load them later."},
-    {title = "Tips", body = "- Hover (or long-press on mobile) any toggle for a tooltip.\n- Click a notification in the Home tab to copy its text.\n- Close button asks for confirmation.\n\nReopen this tutorial any time from the Home tab."},
+    {title = "Welcome", body = "Every tab on the left groups related features.\n\nThe top search box searches EVERY tab at once.\n\nRight Shift minimizes/restores the menu."},
+    {title = "Home Tab", body = "Home is your dashboard:\n\n- Live Status: your role, murderer, sheriff, hero, distance.\n- Quick Actions: PVP Ready, Restore, Turn Off All, Panic.\n- Session Stats.\n- FPS/Ping overlay toggle.\n- Notification History (click to copy)."},
+    {title = "PVP Ready & Restore", body = "PVP Ready turns on a curated set of features at once.\n\nRestore Before PVP reverts everything back to how it was before you clicked PVP Ready."},
+    {title = "Keybinds & Panic", body = "Open the Keybinds tab to set hotkeys.\n\nThe Panic keybind (default End) silently turns everything off and minimizes the menu."},
+    {title = "Saved Configs", body = "The Config tab lets you save your current toggle state into one of 3 slots."},
+    {title = "Tips", body = "Click a notification in the Home tab to copy its text.\nClose button asks for confirmation.\nReopen this tutorial any time from the Home tab."},
 }
 local tutIdx = 1
 local function renderTut()
@@ -2521,16 +2593,19 @@ do
     U.crosshairH.Size = UDim2.fromOffset(CH_LEN, CH_THICK)
     U.crosshairH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairH.BorderSizePixel = 0
+    U.crosshairH.Active = false
     U.crosshairH.Parent = S.crosshairGui
     U.crosshairV = Instance.new("Frame")
     U.crosshairV.Size = UDim2.fromOffset(CH_THICK, CH_LEN)
     U.crosshairV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairV.BorderSizePixel = 0
+    U.crosshairV.Active = false
     U.crosshairV.Parent = S.crosshairGui
     U.crosshairDot = Instance.new("Frame")
     U.crosshairDot.Size = UDim2.fromOffset(CH_DOT, CH_DOT)
     U.crosshairDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     U.crosshairDot.BorderSizePixel = 0
+    U.crosshairDot.Active = false
     U.crosshairDot.Parent = S.crosshairGui
 end
 
@@ -2546,6 +2621,7 @@ DirUI.frame = Instance.new("Frame")
 DirUI.frame.Size = msz(30, 30)
 DirUI.frame.BackgroundTransparency = 1
 DirUI.frame.Visible = false
+DirUI.frame.Active = false
 DirUI.frame.Parent = DirUI.gui
 DirUI.arrow = Instance.new("TextLabel")
 DirUI.arrow.Size = UDim2.new(1, 0, 1, 0)
@@ -2581,6 +2657,7 @@ PerfUI.frame.Position = mpos(10, 10)
 PerfUI.frame.BackgroundColor3 = Color3.fromRGB(18, 19, 24)
 PerfUI.frame.BackgroundTransparency = 0.3
 PerfUI.frame.BorderSizePixel = 0
+PerfUI.frame.Active = false
 PerfUI.frame.Parent = PerfUI.gui
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = PerfUI.frame end
 PerfUI.label = Instance.new("TextLabel")
@@ -2593,7 +2670,7 @@ PerfUI.label.Font = Enum.Font.GothamBold
 PerfUI.label.Parent = PerfUI.frame
 
 -- ═══════════════════════════════════════════════════════════
--- ESP / TRAILS / GUN (unchanged)
+-- ESP / TRAILS / GUN
 -- ═══════════════════════════════════════════════════════════
 local function mkHL(t)
     if t == player or not t.Character then return end
@@ -3074,7 +3151,7 @@ attackTarget = function(t)
 end
 
 -- ═══════════════════════════════════════════════════════════
--- DRAG / RESIZE (via drag handle button)
+-- DRAG / RESIZE
 -- ═══════════════════════════════════════════════════════════
 local dragStart, dragStartFramePos
 U.dragHandle.InputBegan:Connect(function(i)
@@ -3151,7 +3228,6 @@ UserInputService.InputEnded:Connect(function(i)
     end
 end)
 
--- Header buttons
 U.close.MouseButton1Click:Connect(function() showCloseConfirm() end)
 U.close.MouseEnter:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(180, 55, 55) end)
 U.close.MouseLeave:Connect(function() U.close.BackgroundColor3 = Color3.fromRGB(42, 44, 52) end)
@@ -3377,6 +3453,7 @@ rebuildKeybindList = function()
             local row = Instance.new("Frame")
             row.Size = UDim2.new(1, 0, 0, mn(16))
             row.BackgroundTransparency = 1
+            row.Active = false
             row.LayoutOrder = getLayoutOrder()
             row.Parent = U.homeRefs.keybindsCard
             local k = Instance.new("TextLabel")
@@ -3429,6 +3506,7 @@ rebuildNotifHistory = function()
         frame.BorderSizePixel = 0
         frame.Text = ""
         frame.AutoButtonColor = false
+        frame.Active = true
         frame.LayoutOrder = idx
         frame.Parent = U.homeRefs.notifScroll
         do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 5) c.Parent = frame end
@@ -3508,7 +3586,8 @@ updateHomeUI = function(rebuildLists)
     U.homeRefs.roundsLbl.Text = tostring(S.stats.rounds)
     U.homeRefs.asMurdererLbl.Text = tostring(S.stats.asMurderer)
     U.homeRefs.asSheriffLbl.Text = tostring(S.stats.asSheriff)
-    U.homeRefs.sessionLbl.Text = fmtTime(os.clock() - S.sessionStart)
+    -- FIXED: use tick() for both start and now
+    U.homeRefs.sessionLbl.Text = fmtTime(tick() - S.sessionStart)
     if rebuildLists or S.homeRebuildDirty then
         rebuildKeybindList()
         rebuildNotifHistory()
@@ -3643,7 +3722,7 @@ UserInputService.InputEnded:Connect(function(i)
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- BACKGROUND LOOPS (with proper yields)
+-- BACKGROUND LOOPS
 -- ═══════════════════════════════════════════════════════════
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
@@ -3765,22 +3844,23 @@ RunService.Stepped:Connect(function()
     end
 end)
 
+-- Anti-void (no task.wait inside Heartbeat; uses cooldown timer)
+local avCooldownUntil = 0
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
-    if not S.antiVoidEnabled or S.antiVoidCooldown then return end
+    if not S.antiVoidEnabled then return end
+    if tick() < avCooldownUntil then return end
     if S.flyEnabled then return end
     local c = player.Character
     if not c then return end
     local r = c:FindFirstChild("HumanoidRootPart")
     if not r then return end
     if r.Position.Y < S.VOID_Y_THRESHOLD then
-        S.antiVoidCooldown = true
+        avCooldownUntil = tick() + 0.5
         local sl = workspace:FindFirstChildOfClass("SpawnLocation")
         if sl then r.CFrame = CFrame.new(sl.Position + Vector3.new(0, 5, 0))
         else r.CFrame = CFrame.new(r.Position.X, 100, r.Position.Z) end
         r.Velocity = Vector3.zero
-        task.wait(0.5)
-        S.antiVoidCooldown = false
     end
 end)
 
@@ -3894,36 +3974,19 @@ task.defer(function()
     pcall(updateHomeUI, true)
 end)
 
--- Region lookup (non-blocking, cached)
+-- Region lookup (non-blocking, only fetch once)
 task.spawn(function()
     local ok, region = pcall(function()
         return LocalizationService:GetCountryRegionForPlayerAsync(player)
     end)
     if ok and region and region ~= "" then
-        S.regionCached = region
         if U.homeRefs.regionLbl then U.homeRefs.regionLbl.Text = region end
     else
         if U.homeRefs.regionLbl then U.homeRefs.regionLbl.Text = "Unknown" end
     end
 end)
 
--- Tutorial shown once
-task.spawn(function()
-    task.wait(0.5)
-    local hasSeen = false
-    if isfile and readfile then
-        pcall(function()
-            if isfile("mm2_menu_tutorial_seen.txt") then hasSeen = true end
-        end)
-        if not hasSeen then pcall(function() writefile("mm2_menu_tutorial_seen.txt", "1") end) end
-    else
-        hasSeen = _G.MM2TutorialSeen == true
-        _G.MM2TutorialSeen = true
-    end
-    if not hasSeen and showTutorial then showTutorial() end
-end)
-
--- Main background loop (with proper yield)
+-- Main background loop
 task.spawn(function()
     while U.gui.Parent and not S.scriptClosed do
         pcall(function()
