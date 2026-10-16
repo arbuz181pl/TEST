@@ -17,9 +17,6 @@ local ALARM_DIST_STEP = 5
 local SCRIPT_VERSION = "v1.3.0"
 local SCRIPT_AUTHOR = "Arbuz"
 
--- ═══════════════════════════════════════════════════════════
--- CHANGELOG (only newest shown in What's New)
--- ═══════════════════════════════════════════════════════════
 local CHANGELOG = {
     {
         version = "v1.3.0",
@@ -43,20 +40,7 @@ local CHANGELOG = {
             "Resize handle now shows ◢ icon",
             "Close script now asks for confirmation",
             "What's New only shows the latest version",
-            "Auto-rejoin on kick (uses hookmetamethod)",
-        },
-    },
-    {
-        version = "v1.2.1",
-        date = "2026-10-16",
-        changes = {
-            "Added Home tab with live status + stats",
-            "Added What's New modal",
-            "Session stats tracking",
-            "Notification history",
-            "Active keybind quick reference",
-            "Copy loadstring button",
-            "Panic button",
+            "Fixed tab building + reorder bugs",
         },
     },
 }
@@ -137,7 +121,6 @@ local S = {
     statsCountedSheriff = false,
     whatsNewAutoShown = false,
     homeRebuildDirty = true,
-    -- v1.3.0 additions
     reAnnounceEnabled = false,
     reAnnounceInterval = 30,
     lastReAnnounceTime = 0,
@@ -149,10 +132,10 @@ local S = {
     fpsOverlayOn = false,
     currentFPS = 60,
     currentPing = 0,
-    savedConfigs = {nil, nil, nil},
+    savedConfigs = {},
     lastAlarmDir = nil,
     tabOrder = {"Home", "Movement", "ESP", "Notifier", "Murderer", "Sheriff", "Teleport", "Keybinds", "Settings", "Utility", "Config"},
-    tabReorderState = {active = false, tab = nil, holdThread = nil, startY = 0},
+    tabReorderState = {active = false, tab = nil, startY = 0},
     tutorialShown = false,
     keybinds = {
         fly = Enum.KeyCode.LeftAlt, noclip = Enum.KeyCode.N, speedhack = Enum.KeyCode.Q,
@@ -199,20 +182,24 @@ local lastAutoGunTP = 0
 local currentLayoutOrder = 0
 local currentParent = nil
 
-local resetAllToggles
-local applyPvpPreset
-local restorePvpSnapshot
-local minimizeMenu
-local showMenu
-local openWhatsNew
-local showTutorial
-local showCloseConfirm
-local updateHomeUI
-local rebuildKeybindList
-local rebuildNotifHistory
+-- ═══════════════════════════════════════════════════════════
+-- FORWARD DECLARATIONS (must be before use)
+-- ═══════════════════════════════════════════════════════════
+local U = { homeRefs = {} }
+local FP = {}
+local NotifUI, TooltipUI, TutorialUI, DirUI, PerfUI
+local showToast
+local openWhatsNew, showTutorial, showCloseConfirm
+local updateHomeUI, rebuildKeybindList, rebuildNotifHistory
+local minimizeMenu, showMenu
+local resetAllToggles, applyPvpPreset, restorePvpSnapshot
+local silentResetAll
+local switchTab, buildSidebarButtons, setupTabEvents, applyRainbowStroke
+local flyState = { BV = nil, BG = nil, Char = nil, Hum = nil, Root = nil, upFlag = 0, downFlag = 0 }
+local stopFly, startFly
 
 -- ═══════════════════════════════════════════════════════════
--- CUSTOM NOTIFICATION SYSTEM
+-- NOTIFICATION SYSTEM
 -- ═══════════════════════════════════════════════════════════
 local NOTIF_COLORS = {
     info = Color3.fromRGB(70, 140, 220),
@@ -222,10 +209,10 @@ local NOTIF_COLORS = {
     round = Color3.fromRGB(180, 110, 230),
 }
 local NOTIF_ICONS = {
-    info = "ℹ", success = "✓", warn = "⚠", alert = "✕", round = "◉",
+    info = "i", success = "✓", warn = "!", alert = "✕", round = "◉",
 }
 
-local NotifUI = {}
+NotifUI = {}
 NotifUI.gui = Instance.new("ScreenGui")
 NotifUI.gui.Name = "MM2Notifs"
 NotifUI.gui.ResetOnSpawn = false
@@ -234,7 +221,7 @@ NotifUI.gui.IgnoreGuiInset = true
 NotifUI.gui.Parent = playerGui
 
 NotifUI.container = Instance.new("Frame")
-NotifUI.container.Size = UDim2.new(0, mn(260), 1, 0)
+NotifUI.container.Size = UDim2.new(0, mn(260), 0, mn(400))
 NotifUI.container.Position = UDim2.new(1, -mn(268), 0, mn(12))
 NotifUI.container.BackgroundTransparency = 1
 NotifUI.container.Parent = NotifUI.gui
@@ -314,6 +301,7 @@ local function pushCustomNotification(title, text, category)
     titleLbl.TextSize = mn(12)
     titleLbl.Font = Enum.Font.GothamBold
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
     titleLbl.Parent = frame
 
     local bodyLbl = Instance.new("TextLabel")
@@ -327,6 +315,7 @@ local function pushCustomNotification(title, text, category)
     bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
     bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
     bodyLbl.TextWrapped = true
+    bodyLbl.TextTruncate = Enum.TextTruncate.AtEnd
     bodyLbl.Parent = frame
 
     local btn = Instance.new("TextButton")
@@ -337,9 +326,7 @@ local function pushCustomNotification(title, text, category)
     btn.MouseButton1Click:Connect(function()
         local clip = title .. "\n" .. text
         local ok = pcall(function() setclipboard(clip) end)
-        if ok and showToast then
-            showToast("Copied notification")
-        end
+        if ok and showToast then showToast("Copied notification") end
     end)
 
     task.spawn(function()
@@ -387,7 +374,7 @@ toastLbl.TextSize = mn(11)
 toastLbl.Font = Enum.Font.GothamBold
 toastLbl.Parent = toastFrame
 
-function showToast(text)
+showToast = function(text)
     toastLbl.Text = text
     toastFrame.Visible = true
     toastFrame.BackgroundTransparency = 1
@@ -414,7 +401,7 @@ end
 
 local function sendNotification(title, text, soundId)
     local category = inferCategory(soundId)
-    pushCustomNotification(title, text, category)
+    pcall(pushCustomNotification, title, text, category)
     table.insert(S.notificationHistory, 1, {title = title, text = text, time = tick(), category = category})
     while #S.notificationHistory > 10 do
         table.remove(S.notificationHistory)
@@ -431,7 +418,7 @@ end
 -- ═══════════════════════════════════════════════════════════
 -- TOOLTIP SYSTEM
 -- ═══════════════════════════════════════════════════════════
-local TooltipUI = {}
+TooltipUI = {}
 TooltipUI.gui = Instance.new("ScreenGui")
 TooltipUI.gui.Name = "MM2Tooltips"
 TooltipUI.gui.ResetOnSpawn = false
@@ -469,7 +456,6 @@ TooltipUI.label.Text = ""
 TooltipUI.label.TextColor3 = Color3.fromRGB(220, 222, 230)
 TooltipUI.label.TextSize = mn(11)
 TooltipUI.label.Font = Enum.Font.Gotham
-TooltipUI.TextWrapped = true
 TooltipUI.label.TextWrapped = true
 TooltipUI.label.TextXAlignment = Enum.TextXAlignment.Left
 TooltipUI.label.Parent = TooltipUI.frame
@@ -491,14 +477,12 @@ local function attachTooltip(btn, text)
     if not btn or not text then return end
     btn.MouseEnter:Connect(function() showTooltip(btn, text) end)
     btn.MouseLeave:Connect(hideTooltip)
-    -- Mobile: long-press for 0.6s
     if IS_MOBILE then
         local holding = false
-        local holdThread = nil
         btn.InputBegan:Connect(function(i)
             if i.UserInputType == Enum.UserInputType.Touch then
                 holding = true
-                holdThread = task.delay(0.6, function()
+                task.delay(0.6, function()
                     if holding then showTooltip(btn, text) end
                 end)
             end
@@ -513,12 +497,8 @@ local function attachTooltip(btn, text)
 end
 
 -- ═══════════════════════════════════════════════════════════
--- UI BUILD
+-- MAIN UI
 -- ═══════════════════════════════════════════════════════════
-local U = {}
-U.homeRefs = {}
-U.savedConfigRefs = {}
-
 local existing = playerGui:FindFirstChild("MM2MenuByArbuz")
 if existing then existing:Destroy() end
 
@@ -551,6 +531,10 @@ do
     U.frameStroke.Thickness = 1
     U.frameStroke.Parent = U.frame
 end
+
+U.scale = Instance.new("UIScale")
+U.scale.Scale = 1
+U.scale.Parent = U.frame
 
 U.header = Instance.new("Frame")
 U.header.Name = "Header"
@@ -627,7 +611,6 @@ U.minimize.ZIndex = 5
 U.minimize.Parent = U.header
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = U.minimize end
 
--- Resize handle with logo
 U.resize = Instance.new("TextButton")
 U.resize.Size = msz(18, 18)
 U.resize.Position = UDim2.new(1, -mn(18), 1, -mn(18))
@@ -710,34 +693,100 @@ U.tabFrames = {}
 U.tabs = {}
 U.tabOrder = S.tabOrder
 
-local function buildTabs()
-    for _, fr in pairs(U.tabFrames) do if fr then fr:Destroy() end end
-    for _, tb in pairs(U.tabs) do if tb then tb:Destroy() end end
-    U.tabFrames = {}
-    U.tabs = {}
-
-    for _, tabName in ipairs(U.tabOrder) do
-        local fr = Instance.new("ScrollingFrame")
-        fr.Name = tabName .. "Tab"
-        fr.Size = UDim2.new(1, 0, 1, -mn(30))
-        fr.Position = mpos(0, 30)
-        fr.BackgroundTransparency = 1
-        fr.BorderSizePixel = 0
-        fr.ScrollBarThickness = 4
-        fr.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
-        fr.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        fr.ScrollingDirection = Enum.ScrollingDirection.Y
-        fr.Visible = false
-        fr.Parent = U.rightArea
-        do
-            local l = Instance.new("UIListLayout")
-            l.Padding = UDim.new(0, 3)
-            l.SortOrder = Enum.SortOrder.LayoutOrder
-            l.Parent = fr
+-- ─── Rainbow stroke helpers ───────────────────────────────
+applyRainbowStroke = function(tab, on)
+    if not tab then return end
+    if on then
+        if not tab:FindFirstChild("RainbowStroke") then
+            local st = Instance.new("UIStroke")
+            st.Name = "RainbowStroke"
+            st.Thickness = 2
+            st.Color = Color3.fromRGB(255, 0, 0)
+            st.Parent = tab
         end
-        U.tabFrames[tabName] = fr
+    else
+        local st = tab:FindFirstChild("RainbowStroke")
+        if st then st:Destroy() end
     end
+end
 
+-- ─── switchTab ─────────────────────────────────────────────
+switchTab = function(name)
+    U.activeTab = name
+    for k, fr in pairs(U.tabFrames) do
+        fr.Visible = (k == name)
+    end
+    for k, btn in pairs(U.tabs) do
+        if k == name then
+            btn.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
+            btn.TextColor3 = Color3.fromRGB(200, 200, 210)
+        end
+    end
+    if U.searchBox.Text ~= "" then U.searchBox.Text = "" end
+    if name == "Home" then
+        S.homeRebuildDirty = true
+    end
+end
+
+-- ─── setupTabEvents ───────────────────────────────────────
+setupTabEvents = function(tabName, tb)
+    local holdToken = 0
+
+    tb.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            if S.tabReorderState.active then return end
+            holdToken = holdToken + 1
+            local myToken = holdToken
+
+            task.delay(3, function()
+                if myToken == holdToken and not S.tabReorderState.active and not S.scriptClosed then
+                    S.tabReorderState.active = true
+                    S.tabReorderState.tab = tabName
+                    applyRainbowStroke(tb, true)
+                    if showToast then showToast("Reordering: " .. tabName) end
+                end
+            end)
+        end
+    end)
+
+    tb.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            holdToken = holdToken + 1
+            if S.tabReorderState.active and S.tabReorderState.tab == tabName then
+                local cursorY = i.Position.Y
+                local sidebarAbs = U.sidebar.AbsolutePosition.Y
+                local relY = cursorY - sidebarAbs
+                local idx = math.clamp(math.floor(relY / mn(26)) + 1, 1, #U.tabOrder)
+                local currentIdx = nil
+                for n, tn in ipairs(U.tabOrder) do
+                    if tn == tabName then currentIdx = n break end
+                end
+                if currentIdx and idx ~= currentIdx then
+                    table.remove(U.tabOrder, currentIdx)
+                    table.insert(U.tabOrder, idx, tabName)
+                    buildSidebarButtons()
+                    switchTab(tabName)
+                end
+                applyRainbowStroke(tb, false)
+                S.tabReorderState.active = false
+                S.tabReorderState.tab = nil
+                if showToast then showToast("Tab moved") end
+                return
+            end
+            switchTab(tabName)
+        end
+    end)
+end
+
+-- ─── buildSidebarButtons ──────────────────────────────────
+buildSidebarButtons = function()
+    for _, tb in pairs(U.tabs) do
+        if tb then tb:Destroy() end
+    end
+    U.tabs = {}
     for idx, tabName in ipairs(U.tabOrder) do
         local tb = Instance.new("TextButton")
         tb.Size = UDim2.new(1, -4, 0, mn(24))
@@ -760,110 +809,30 @@ local function buildTabs()
     end
 end
 
-U.activeTab = nil
-local function switchTab(name)
-    U.activeTab = name
-    for k, fr in pairs(U.tabFrames) do
-        fr.Visible = (k == name)
+-- ─── Initial frame creation (runs ONCE) ───────────────────
+for _, tabName in ipairs(U.tabOrder) do
+    local fr = Instance.new("ScrollingFrame")
+    fr.Name = tabName .. "Tab"
+    fr.Size = UDim2.new(1, 0, 1, -mn(30))
+    fr.Position = mpos(0, 30)
+    fr.BackgroundTransparency = 1
+    fr.BorderSizePixel = 0
+    fr.ScrollBarThickness = 4
+    fr.ScrollBarImageColor3 = Color3.fromRGB(75, 77, 85)
+    fr.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    fr.ScrollingDirection = Enum.ScrollingDirection.Y
+    fr.Visible = false
+    fr.Parent = U.rightArea
+    do
+        local l = Instance.new("UIListLayout")
+        l.Padding = UDim.new(0, 3)
+        l.SortOrder = Enum.SortOrder.LayoutOrder
+        l.Parent = fr
     end
-    for k, btn in pairs(U.tabs) do
-        if k == name then
-            btn.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
-            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        else
-            btn.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
-            btn.TextColor3 = Color3.fromRGB(200, 200, 210)
-        end
-    end
-    if U.searchBox.Text ~= "" then U.searchBox.Text = "" end
-    if name == "Home" then
-        S.homeRebuildDirty = true
-    end
+    U.tabFrames[tabName] = fr
 end
 
--- Tab reorder (hold 3s + rainbow)
-local function applyRainbowStroke(tab, on)
-    if not tab then return end
-    if on then
-        if not tab:FindFirstChild("RainbowStroke") then
-            local st = Instance.new("UIStroke")
-            st.Name = "RainbowStroke"
-            st.Thickness = 2
-            st.Color = Color3.fromRGB(255, 0, 0)
-            st.Parent = tab
-        end
-    else
-        local st = tab:FindFirstChild("RainbowStroke")
-        if st then st:Destroy() end
-    end
-end
-
-local function setupTabEvents(tabName, tb)
-    local holdCompleted = false
-    local holdToken = 0
-    local inputStart = nil
-
-    tb.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            if S.tabReorderState.active then return end
-            holdCompleted = false
-            holdToken = holdToken + 1
-            local myToken = holdToken
-            inputStart = i.Position
-
-            task.delay(3, function()
-                if myToken == holdToken and not holdCompleted then
-                    -- enter reorder mode
-                    S.tabReorderState.active = true
-                    S.tabReorderState.tab = tabName
-                    S.tabReorderState.startY = i.Position.Y
-                    applyRainbowStroke(tb, true)
-                    showToast("Reordering: " .. tabName)
-                end
-            end)
-        end
-    end)
-
-    tb.MouseButton1Click:Connect(function()
-        holdCompleted = true
-        holdToken = holdToken + 1
-        if S.tabReorderState.active then
-            S.tabReorderState.active = false
-            applyRainbowStroke(tb, false)
-            S.tabReorderState.tab = nil
-            return
-        end
-        switchTab(tabName)
-    end)
-
-    tb.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            if S.tabReorderState.active and S.tabReorderState.tab == tabName then
-                -- Finalize reorder based on cursor Y
-                local cursorY = i.Position.Y
-                local sidebarAbs = U.sidebar.AbsolutePosition.Y
-                local relY = cursorY - sidebarAbs
-                local idx = math.clamp(math.floor(relY / mn(26)) + 1, 1, #U.tabOrder)
-                local currentIdx = nil
-                for n, tn in ipairs(U.tabOrder) do
-                    if tn == tabName then currentIdx = n break end
-                end
-                if currentIdx and idx ~= currentIdx then
-                    table.remove(U.tabOrder, currentIdx)
-                    table.insert(U.tabOrder, idx, tabName)
-                    buildTabs()
-                    switchTab(tabName)
-                end
-                applyRainbowStroke(tb, false)
-                S.tabReorderState.active = false
-                S.tabReorderState.tab = nil
-                showToast("Tab moved")
-            end
-        end
-    end)
-end
-
-buildTabs()
+buildSidebarButtons()
 switchTab("Home")
 
 U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -881,6 +850,9 @@ U.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
+-- ═══════════════════════════════════════════════════════════
+-- UI HELPERS
+-- ═══════════════════════════════════════════════════════════
 local function createSectionTitle(text)
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(1, 0, 0, mn(14))
@@ -1031,10 +1003,9 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- WHAT'S NEW MODAL (only newest version)
+-- WHAT'S NEW MODAL
 -- ═══════════════════════════════════════════════════════════
 U.whatsNewOverlay = Instance.new("TextButton")
-U.whatsNewOverlay.Name = "WhatsNewOverlay"
 U.whatsNewOverlay.Size = UDim2.new(1, 0, 1, 0)
 U.whatsNewOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 U.whatsNewOverlay.BackgroundTransparency = 0.5
@@ -1113,7 +1084,6 @@ do
     l.Parent = U.wnScroll
 end
 
--- Only render newest version
 do
     local entry = CHANGELOG[1]
     if entry then
@@ -1249,7 +1219,6 @@ end
 U.closeConfirm.MouseButton1Click:Connect(function()
     U.closeConfirm.Visible = false
 end)
-ccPanel.InputBegan:Connect(function() end) -- swallow clicks
 ccNo.MouseButton1Click:Connect(function()
     U.closeConfirm.Visible = false
 end)
@@ -1272,20 +1241,22 @@ do
     l.Parent = U.homeBtnRow
 end
 
-local homeBtnParent = currentParent
+local homeParentBackup = currentParent
 currentParent = U.homeBtnRow
-U.whatsNewBtn = createActionButton("WhatsNewBtn", "📢 What's New", "See what changed in the latest update")
+U.whatsNewBtn = createActionButton("WhatsNewBtn", "What's New", "See what changed in the latest update")
 U.whatsNewBtn.Size = UDim2.new(0.5, -2, 1, 0)
 U.whatsNewBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 115)
 U.whatsNewBtn.TextColor3 = Color3.fromRGB(220, 235, 255)
 U.whatsNewBtn.MouseButton1Click:Connect(function() openWhatsNew() end)
 
-U.tutorialBtn = createActionButton("TutorialBtn", "🎓 Tutorial", "Reopen the interactive tutorial")
+U.tutorialBtn = createActionButton("TutorialBtn", "Tutorial", "Reopen the interactive tutorial")
 U.tutorialBtn.Size = UDim2.new(0.5, -2, 1, 0)
 U.tutorialBtn.BackgroundColor3 = Color3.fromRGB(55, 60, 85)
 U.tutorialBtn.TextColor3 = Color3.fromRGB(220, 225, 245)
-U.tutorialBtn.MouseButton1Click:Connect(function() if showTutorial then showTutorial() end end)
-currentParent = homeBtnParent
+U.tutorialBtn.MouseButton1Click:Connect(function()
+    if showTutorial then showTutorial() end
+end)
+currentParent = homeParentBackup
 
 createSectionTitle("LIVE STATUS")
 do
@@ -1306,7 +1277,7 @@ U.homePvpBtn.MouseButton1Click:Connect(function()
     if applyPvpPreset then applyPvpPreset() end
 end)
 
-U.homeRestoreBtn = createActionButton("HomeRestoreBtn", "Restore Before PVP", "Revert to the settings that were active before PVP Ready")
+U.homeRestoreBtn = createActionButton("HomeRestoreBtn", "Restore Before PVP", "Revert to settings active before PVP Ready")
 U.homeRestoreBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 35)
 U.homeRestoreBtn.MouseButton1Click:Connect(function()
     if restorePvpSnapshot then restorePvpSnapshot() end
@@ -1319,12 +1290,12 @@ U.homeTurnOffBtn.MouseButton1Click:Connect(function()
     if resetAllToggles then resetAllToggles() end
 end)
 
-U.homePanicBtn = createActionButton("HomePanicBtn", "⚠  PANIC", "Silently turn everything off and minimize the menu")
+U.homePanicBtn = createActionButton("HomePanicBtn", "PANIC (silent off + minimize)", "Silently turn everything off and minimize")
 U.homePanicBtn.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
 U.homePanicBtn.TextColor3 = Color3.fromRGB(255, 220, 220)
 U.homePanicBtn.MouseButton1Click:Connect(function()
-    if resetAllToggles then pcall(resetAllToggles) end
-    if minimizeMenu then pcall(minimizeMenu) end
+    if silentResetAll then silentResetAll() end
+    if minimizeMenu then minimizeMenu() end
 end)
 
 createSectionTitle("PERFORMANCE")
@@ -1334,11 +1305,11 @@ do
     U.homeRefs.pingLbl = addInfoRow(card, "Ping", "--")
 end
 
-U.homeFpsToggle, U.homeFpsInd = createToggle("HomeFpsToggle", "Show FPS/Ping Overlay", "Pin a small FPS/ping monitor to the top-left of your screen")
+U.homeFpsToggle, U.homeFpsInd = createToggle("HomeFpsToggle", "Show FPS/Ping Overlay", "Pin a small FPS/ping monitor to the top-left")
 U.homeFpsToggle.MouseButton1Click:Connect(function()
     S.fpsOverlayOn = not S.fpsOverlayOn
     if S.fpsOverlayOn then setOn(U.homeFpsToggle, U.homeFpsInd) else setOff(U.homeFpsToggle, U.homeFpsInd) end
-    if PerfUI then PerfUI.gui.Enabled = S.fpsOverlayOn end
+    if PerfUI and PerfUI.gui then PerfUI.gui.Enabled = S.fpsOverlayOn end
 end)
 
 createSectionTitle("SESSION STATS")
@@ -1381,8 +1352,16 @@ U.crossSearchResults.LayoutOrder = getLayoutOrder()
 U.crossSearchResults.Parent = currentParent
 do
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent = U.crossSearchResults
-    local p = Instance.new("UIPadding") p.PaddingTop = UDim.new(0, 4) p.PaddingBottom = UDim.new(0, 4) p.PaddingLeft = UDim.new(0, 4) p.PaddingRight = UDim.new(0, 4) p.Parent = U.crossSearchResults
-    local l = Instance.new("UIListLayout") l.Padding = UDim.new(0, 2) l.SortOrder = Enum.SortOrder.LayoutOrder l.Parent = U.crossSearchResults
+    local p = Instance.new("UIPadding")
+    p.PaddingTop = UDim.new(0, 4)
+    p.PaddingBottom = UDim.new(0, 4)
+    p.PaddingLeft = UDim.new(0, 4)
+    p.PaddingRight = UDim.new(0, 4)
+    p.Parent = U.crossSearchResults
+    local l = Instance.new("UIListLayout")
+    l.Padding = UDim.new(0, 2)
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Parent = U.crossSearchResults
 end
 
 local function refreshCrossSearch()
@@ -1448,11 +1427,8 @@ U.copyLsBtn = createActionButton("CopyLsBtn", "Copy Loadstring", "Copy the loads
 U.copyLsBtn.MouseButton1Click:Connect(function()
     local ls = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/arbuz181pl/TEST/refs/heads/main/TEST.lua"))()'
     local ok = pcall(function() setclipboard(ls) end)
-    if ok then
-        showToast("Loadstring copied")
-    else
-        sendNotification("MM2 Menu", "Clipboard not supported on this executor", SOUNDS.alert)
-    end
+    if ok then showToast("Loadstring copied")
+    else sendNotification("MM2 Menu", "Clipboard not supported on this executor", SOUNDS.alert) end
 end)
 
 createSectionTitle("NOTIFICATION HISTORY (click to copy)")
@@ -1539,7 +1515,7 @@ end
 rebuildNotifHistory = function()
     if not U.homeRefs.notifScroll then return end
     for _, child in ipairs(U.homeRefs.notifScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
+        if child:IsA("Frame") or child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
     end
     if #S.notificationHistory == 0 then
         local empty = Instance.new("TextLabel")
@@ -1580,6 +1556,7 @@ rebuildNotifHistory = function()
         t.TextSize = mn(10)
         t.Font = Enum.Font.GothamBold
         t.TextXAlignment = Enum.TextXAlignment.Left
+        t.TextTruncate = Enum.TextTruncate.AtEnd
         t.Parent = frame
         local b = Instance.new("TextLabel")
         b.Size = UDim2.new(1, -mn(55), 0, mn(12))
@@ -1678,7 +1655,7 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- MOVEMENT TAB (unchanged structure)
+-- MOVEMENT TAB
 -- ═══════════════════════════════════════════════════════════
 currentParent = U.tabFrames.Movement
 createSectionTitle("MOVEMENT")
@@ -1706,9 +1683,8 @@ U.noclipBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.flyBtn, U.flyInd = createToggle("Fly", "Fly", "Hold WASD/joystick + Space to fly")
+U.flyBtn, U.flyInd = createToggle("Fly", "Fly", "Use WASD/joystick + Space to fly")
 
-local FP = {}
 FP.panel = Instance.new("Frame")
 FP.panel.Size = msz(210, 220)
 FP.panel.Position = UDim2.new(0.5, mn(150), 0.5, -mn(110))
@@ -1865,9 +1841,6 @@ FP.down.ZIndex = 21
 FP.down.Parent = FP.panel
 do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 7) c.Parent = FP.down end
 
-local flyBV, flyBG, flyChar, flyHum, flyRoot = nil, nil, nil, nil, nil
-local flyUpFlag, flyDownFlag = 0, 0
-
 local function updateFlySpeed(v)
     v = tonumber(v) or S.flySpeed
     v = math.clamp(math.floor(v), 1, 500)
@@ -1880,11 +1853,11 @@ FP.minus.MouseButton1Click:Connect(function() updateFlySpeed(S.flySpeed - 1) end
 FP.plus.MouseButton1Click:Connect(function() updateFlySpeed(S.flySpeed + 1) end)
 FP.speedBox.FocusLost:Connect(function() updateFlySpeed(FP.speedBox.Text) end)
 
-local function stopFly()
+stopFly = function()
     S.flyEnabled = false
-    if flyBV then flyBV:Destroy() flyBV = nil end
-    if flyBG then flyBG:Destroy() flyBG = nil end
-    flyChar = nil flyHum = nil flyRoot = nil
+    if flyState.BV then flyState.BV:Destroy() flyState.BV = nil end
+    if flyState.BG then flyState.BG:Destroy() flyState.BG = nil end
+    flyState.Char = nil flyState.Hum = nil flyState.Root = nil
     local c = player.Character
     if c then
         local h = c:FindFirstChildOfClass("Humanoid")
@@ -1895,24 +1868,24 @@ local function stopFly()
     setOff(U.flyBtn, U.flyInd)
 end
 
-local function startFly()
+startFly = function()
     local c = player.Character
     if not c then return end
     local h = c:FindFirstChildOfClass("Humanoid")
     local r = c:FindFirstChild("HumanoidRootPart")
     if not h or not r then return end
-    if flyBV then flyBV:Destroy() end
-    if flyBG then flyBG:Destroy() end
+    if flyState.BV then flyState.BV:Destroy() end
+    if flyState.BG then flyState.BG:Destroy() end
     S.flyEnabled = true
-    flyChar = c flyHum = h flyRoot = r
+    flyState.Char = c flyState.Hum = h flyState.Root = r
     h.PlatformStand = true
-    flyBG = Instance.new("BodyGyro")
-    flyBG.P = 90000 flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    flyBG.CFrame = r.CFrame flyBG.Parent = r
-    flyBV = Instance.new("BodyVelocity")
-    flyBV.Velocity = Vector3.zero
-    flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    flyBV.Parent = r
+    flyState.BG = Instance.new("BodyGyro")
+    flyState.BG.P = 90000 flyState.BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyState.BG.CFrame = r.CFrame flyState.BG.Parent = r
+    flyState.BV = Instance.new("BodyVelocity")
+    flyState.BV.Velocity = Vector3.zero
+    flyState.BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyState.BV.Parent = r
     FP.enable.Text = "Disable Fly"
     setOn(FP.enable, FP.enableInd)
     setOn(U.flyBtn, U.flyInd)
@@ -1966,7 +1939,7 @@ UserInputService.InputEnded:Connect(function(i)
 end)
 
 RunService.RenderStepped:Connect(function()
-    if not S.flyEnabled or not flyBV or not flyBG then return end
+    if not S.flyEnabled or not flyState.BV or not flyState.BG then return end
     local c = player.Character
     if not c then stopFly() return end
     local r = c:FindFirstChild("HumanoidRootPart")
@@ -1981,16 +1954,16 @@ RunService.RenderStepped:Connect(function()
     if hum and hum.MoveDirection.Magnitude > 0.05 then
         dir = dir + hum.MoveDirection
     end
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) or flyUpFlag == 1 then dir = dir + Vector3.new(0, 1, 0) end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or flyDownFlag == -1 then dir = dir - Vector3.new(0, 1, 0) end
-    if dir.Magnitude > 0 then flyBV.Velocity = dir.Unit * S.flySpeed else flyBV.Velocity = Vector3.zero end
-    flyBG.CFrame = cam.CFrame
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) or flyState.upFlag == 1 then dir = dir + Vector3.new(0, 1, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or flyState.downFlag == -1 then dir = dir - Vector3.new(0, 1, 0) end
+    if dir.Magnitude > 0 then flyState.BV.Velocity = dir.Unit * S.flySpeed else flyState.BV.Velocity = Vector3.zero end
+    flyState.BG.CFrame = cam.CFrame
 end)
 
-FP.up.MouseButton1Down:Connect(function() flyUpFlag = 1 end)
-FP.up.MouseButton1Up:Connect(function() flyUpFlag = 0 end)
-FP.down.MouseButton1Down:Connect(function() flyDownFlag = -1 end)
-FP.down.MouseButton1Up:Connect(function() flyDownFlag = 0 end)
+FP.up.MouseButton1Down:Connect(function() flyState.upFlag = 1 end)
+FP.up.MouseButton1Up:Connect(function() flyState.upFlag = 0 end)
+FP.down.MouseButton1Down:Connect(function() flyState.downFlag = -1 end)
+FP.down.MouseButton1Up:Connect(function() flyState.downFlag = 0 end)
 
 U.infBtn, U.infInd = createToggle("InfinityJump", "Infinity Jump", "Jump again while airborne")
 U.infBtn.MouseButton1Click:Connect(function()
@@ -2233,7 +2206,7 @@ U.autoNotBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.reAnnBtn, U.reAnnInd = createToggle("ReAnnounce", "Re-announce Roles Every 30s", "Repeat the role announcement every 30 seconds while active")
+U.reAnnBtn, U.reAnnInd = createToggle("ReAnnounce", "Re-announce Roles Every 30s", "Repeat role announcement every 30s")
 U.reAnnBtn.MouseButton1Click:Connect(function()
     S.reAnnounceEnabled = not S.reAnnounceEnabled
     if S.reAnnounceEnabled then
@@ -2270,7 +2243,7 @@ U.plBtn.MouseButton1Click:Connect(function()
     if S.playerJoinLeaveNotify then setOn(U.plBtn, U.plInd) else setOff(U.plBtn, U.plInd) end
 end)
 
-U.autoHideBtn, U.autoHideInd = createToggle("AutoHideInRound", "Auto-hide UI When Round Starts", "Minimize the menu when a round starts, restore when it ends")
+U.autoHideBtn, U.autoHideInd = createToggle("AutoHideInRound", "Auto-hide UI When Round Starts", "Minimize menu when round starts, restore when ends")
 U.autoHideBtn.MouseButton1Click:Connect(function()
     S.autoHideInRound = not S.autoHideInRound
     if S.autoHideInRound then setOn(U.autoHideBtn, U.autoHideInd) else setOff(U.autoHideBtn, U.autoHideInd) end
@@ -2322,7 +2295,7 @@ U.sendSheriffBtn.MouseButton1Click:Connect(function()
     sendChat(getRoleMessage("Sheriff", SheriffName))
 end)
 
-U.autoChatBtn, U.autoChatInd = createToggle("AutoMurdererChat", "Auto Send Murderer In Chat", "Announce the murderer automatically once per round")
+U.autoChatBtn, U.autoChatInd = createToggle("AutoMurdererChat", "Auto Send Murderer In Chat", "Announce murderer automatically once per round")
 U.autoChatBtn.MouseButton1Click:Connect(function()
     S.autoSendMurdererChat = not S.autoSendMurdererChat
     if S.autoSendMurdererChat then
@@ -2338,7 +2311,7 @@ U.autoChatBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.autoSheriffChatBtn, U.autoSheriffChatInd = createToggle("AutoSheriffChat", "Auto Send Sheriff In Chat", "Announce the sheriff automatically once per round")
+U.autoSheriffChatBtn, U.autoSheriffChatInd = createToggle("AutoSheriffChat", "Auto Send Sheriff In Chat", "Announce sheriff automatically once per round")
 U.autoSheriffChatBtn.MouseButton1Click:Connect(function()
     S.autoSendSheriffChat = not S.autoSendSheriffChat
     if S.autoSendSheriffChat then
@@ -2452,7 +2425,7 @@ U.killSheriffBtn.MouseButton1Click:Connect(function() killByName(SheriffName) en
 U.killHeroBtn = createActionButton("KillHeroNow", "Kill Hero Now")
 U.killHeroBtn.MouseButton1Click:Connect(function() killByName(HeroName) end)
 
-U.killSoundBtn, U.killSoundInd = createToggle("KillSound", "Kill Sound", "Play a success sound when you get a kill")
+U.killSoundBtn, U.killSoundInd = createToggle("KillSound", "Kill Sound", "Play success sound when you get a kill")
 U.killSoundBtn.MouseButton1Click:Connect(function()
     S.killSoundOn = not S.killSoundOn
     if S.killSoundOn then setOn(U.killSoundBtn, U.killSoundInd) else setOff(U.killSoundBtn, U.killSoundInd) end
@@ -2796,7 +2769,7 @@ end
 currentParent = U.tabFrames.Settings
 createSectionTitle("MENU SETTINGS")
 
-U.compactBtn, U.compactInd = createToggle("CompactMode", "Compact Mode", "Slightly smaller fonts and tighter layout")
+U.compactBtn, U.compactInd = createToggle("CompactMode", "Compact Mode", "Slightly shrink the whole menu")
 U.compactBtn.MouseButton1Click:Connect(function()
     S.compactMode = not S.compactMode
     if S.compactMode then
@@ -2804,19 +2777,7 @@ U.compactBtn.MouseButton1Click:Connect(function()
     else
         setOff(U.compactBtn, U.compactInd)
     end
-    -- Apply by walking all children and updating TextSize
-    local factor = S.compactMode and 0.85 or (1 / 0.85)
-    for _, desc in ipairs(U.frame:GetDescendants()) do
-        if desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox") then
-            local ts = desc:GetAttribute("BaseTextSize")
-            if not ts then
-                ts = desc.TextSize
-                desc:SetAttribute("BaseTextSize", ts)
-            end
-            local newSize = math.max(8, math.floor(ts * (S.compactMode and 0.85 or 1)))
-            -- since we stored base, this stays stable
-        end
-    end
+    U.scale.Scale = S.compactMode and 0.88 or 1
 end)
 
 createSectionTitle("MENU OPACITY")
@@ -3064,7 +3025,7 @@ end)
 
 createSectionTitle("OVERLAYS")
 
-U.killerAlarmBtn, U.killerAlarmInd = createToggle("KillerAlarm", "Killer Alarm (30 studs)", "Notify when the murderer gets closer than 30 studs")
+U.killerAlarmBtn, U.killerAlarmInd = createToggle("KillerAlarm", "Killer Alarm (30 studs)", "Notify when murderer gets closer than 30 studs")
 U.killerAlarmBtn.MouseButton1Click:Connect(function()
     S.killerAlarmOn = not S.killerAlarmOn
     if S.killerAlarmOn then
@@ -3077,14 +3038,14 @@ U.killerAlarmBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-U.dirBtn, U.dirInd = createToggle("DirIndicator", "Direction Arrow to Murderer", "Show an arrow around the crosshair pointing toward the murderer")
+U.dirBtn, U.dirInd = createToggle("DirIndicator", "Direction Arrow to Murderer", "Show an arrow pointing toward the murderer")
 U.dirBtn.MouseButton1Click:Connect(function()
     S.dirIndicatorOn = not S.dirIndicatorOn
     if S.dirIndicatorOn then
         setOn(U.dirBtn, U.dirInd)
     else
         setOff(U.dirBtn, U.dirInd)
-        if DirUI then DirUI.gui.Enabled = false end
+        if DirUI and DirUI.gui then DirUI.gui.Enabled = false end
     end
 end)
 
@@ -3257,7 +3218,7 @@ resetAllToggles = function()
     if S.dirIndicatorOn then
         S.dirIndicatorOn = false
         setOff(U.dirBtn, U.dirInd)
-        if DirUI then DirUI.gui.Enabled = false end
+        if DirUI and DirUI.gui then DirUI.gui.Enabled = false end
     end
     if S.cameraFollowMurderer then S.cameraFollowMurderer = false setOff(U.camFollowBtn, U.camFollowInd) end
     if S.crosshairOn then
@@ -3276,8 +3237,7 @@ resetAllToggles = function()
     sendNotification("MM2 Menu", "All features turned off")
 end
 
--- Silent version for panic key
-local function silentResetAll()
+silentResetAll = function()
     local oldSend = sendNotification
     sendNotification = function() end
     pcall(resetAllToggles)
@@ -3318,7 +3278,7 @@ end
 -- ═══════════════════════════════════════════════════════════
 -- DIRECTION INDICATOR
 -- ═══════════════════════════════════════════════════════════
-local DirUI = {}
+DirUI = {}
 DirUI.gui = Instance.new("ScreenGui")
 DirUI.gui.Name = "MM2DirArrow"
 DirUI.gui.ResetOnSpawn = false
@@ -3357,7 +3317,7 @@ DirUI.distLbl.Parent = DirUI.frame
 -- ═══════════════════════════════════════════════════════════
 -- PERF OVERLAY
 -- ═══════════════════════════════════════════════════════════
-local PerfUI = {}
+PerfUI = {}
 PerfUI.gui = Instance.new("ScreenGui")
 PerfUI.gui.Name = "MM2Perf"
 PerfUI.gui.ResetOnSpawn = false
@@ -3454,7 +3414,7 @@ local function applyFullSnapshot(snap)
         S.antiFlingEnabled = snap.antiFlingEnabled
         if S.antiFlingEnabled then setOn(U.afBtn, U.afInd) else setOff(U.afBtn, U.afInd) end
     end
-    for role, state in pairs(snap.esp) do
+    for role, state in pairs(snap.esp or {}) do
         if state ~= S.espEnabled[role] then
             S.espEnabled[role] = state
             if espButtons[role] then
@@ -3548,7 +3508,8 @@ local function applyFullSnapshot(snap)
     end
     if snap.dirIndicatorOn ~= S.dirIndicatorOn then
         S.dirIndicatorOn = snap.dirIndicatorOn
-        if S.dirIndicatorOn then setOn(U.dirBtn, U.dirInd) else setOff(U.dirBtn, U.dirInd) if DirUI then DirUI.gui.Enabled = false end end
+        if S.dirIndicatorOn then setOn(U.dirBtn, U.dirInd) else setOff(U.dirBtn, U.dirInd) end
+        if not S.dirIndicatorOn and DirUI and DirUI.gui then DirUI.gui.Enabled = false end
     end
     if snap.autoHideInRound ~= S.autoHideInRound then
         S.autoHideInRound = snap.autoHideInRound
@@ -3616,7 +3577,7 @@ local function buildConfigSlot(idx)
     delBtn.Size = msz(30, 24)
     delBtn.Position = UDim2.new(1, -mn(34), 0.5, -mn(12))
     delBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40)
-    delBtn.Text = "✕"
+    delBtn.Text = "X"
     delBtn.TextColor3 = Color3.fromRGB(255, 210, 210)
     delBtn.TextSize = mn(12)
     delBtn.Font = Enum.Font.GothamBold
@@ -3661,7 +3622,6 @@ pInfo.TextYAlignment = Enum.TextYAlignment.Top
 pInfo.LayoutOrder = getLayoutOrder()
 pInfo.Parent = currentParent
 
--- Apply PVP preset
 applyPvpPreset = function()
     if not S.pvpSnapshot then
         S.pvpSnapshot = snapshotFullSettings()
@@ -3775,14 +3735,10 @@ local function roundEvents()
         S.stats.rounds = S.stats.rounds + 1
         S.statsCountedMurderer = false
         S.statsCountedSheriff = false
-        if S.autoHideInRound then
-            if minimizeMenu then pcall(minimizeMenu) end
-        end
+        if S.autoHideInRound and minimizeMenu then pcall(minimizeMenu) end
     end
     if not MurdererName and wasMurderer then
-        if S.autoHideInRound and not S.menuVisible then
-            if showMenu then pcall(showMenu) end
-        end
+        if S.autoHideInRound and not S.menuVisible and showMenu then pcall(showMenu) end
     end
     if S.notifyRoundStart and MurdererName and MurdererName ~= wasMurderer then
         sendNotification("Round Started", "Murderer: " .. tostring(MurdererName), SOUNDS.round)
@@ -4199,7 +4155,6 @@ local function checkAutoChat()
     end
 end
 
--- Alarm loop
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     if not S.killerAlarmOn or not MurdererName then
@@ -4223,11 +4178,10 @@ RunService.Heartbeat:Connect(function()
     if dist < S.lastAlarmDist - ALARM_DIST_STEP and (now - (S.lastAlarmTime or 0)) >= ALARM_TIME_COOLDOWN then
         S.lastAlarmDist = dist
         S.lastAlarmTime = now
-        sendNotification("⚠ MURDERER NEAR", "Murderer is " .. math.floor(dist) .. " studs away!", SOUNDS.alert)
+        sendNotification("Murderer Near", "Murderer is " .. math.floor(dist) .. " studs away!", SOUNDS.alert)
     end
 end)
 
--- Gun drop alert
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     if not S.gunDropAlert then return end
@@ -4239,7 +4193,6 @@ RunService.Heartbeat:Connect(function()
     S.lastGunDropped = isDropped
 end)
 
--- Render loop: crosshair, camera follow, direction arrow
 RunService.RenderStepped:Connect(function()
     if S.scriptClosed then return end
     if S.cameraFollowMurderer and MurdererName then
@@ -4270,7 +4223,6 @@ RunService.RenderStepped:Connect(function()
         U.crosshairV.Position = UDim2.fromOffset(cx - CH_THICK / 2, cy - CH_LEN / 2)
         U.crosshairDot.Position = UDim2.fromOffset(cx - CH_DOT / 2, cy - CH_DOT / 2)
     end
-    -- Direction indicator
     if S.dirIndicatorOn and MurdererName and MurdererName ~= player.Name then
         local m = Players:FindFirstChild(MurdererName)
         local me = player.Character
@@ -4284,7 +4236,6 @@ RunService.RenderStepped:Connect(function()
                 local delta = mRoot.Position - myRoot.Position
                 local camLook = cam.CFrame.LookVector
                 local angle = math.atan2(delta.X, delta.Z) - math.atan2(camLook.X, camLook.Z)
-                -- Position around screen edge or center
                 local vp = cam.ViewportSize
                 local cx = vp.X / 2
                 local cy = vp.Y / 2
@@ -4389,7 +4340,6 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- FPS / Ping measurement
 task.spawn(function()
     local frames = 0
     local last = tick()
@@ -4422,7 +4372,7 @@ end
 if player.Character then hookPlayerDeath(player.Character) end
 player.CharacterAdded:Connect(function(character)
     stopFly()
-    flyUpFlag = 0 flyDownFlag = 0
+    flyState.upFlag = 0 flyState.downFlag = 0
     S.originalCollision = {}
     S.lastSafePosition = nil
     S.antiVoidCooldown = false
@@ -4445,9 +4395,6 @@ player.CharacterAdded:Connect(function(character)
     updateHL()
 end)
 
--- ═══════════════════════════════════════════════════════════
--- AUTO REJOIN ON KICK
--- ═══════════════════════════════════════════════════════════
 pcall(function()
     if hookmetamethod and getnamecallmethod then
         local originalNamecall
@@ -4469,7 +4416,7 @@ end)
 -- ═══════════════════════════════════════════════════════════
 -- TUTORIAL
 -- ═══════════════════════════════════════════════════════════
-local TutorialUI = {}
+TutorialUI = {}
 TutorialUI.gui = Instance.new("ScreenGui")
 TutorialUI.gui.Name = "MM2Tutorial"
 TutorialUI.gui.ResetOnSpawn = false
@@ -4563,27 +4510,27 @@ do local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 8) c.Parent =
 local TUTORIAL_PAGES = {
     {
         title = "Welcome to MM2 Menu",
-        body = "This is a quick tour of the menu's features.\n\nEvery tab on the left groups related features. Click any tab to switch. The search box at the top right of every tab filters buttons in that tab only.\n\nOn the Home tab you have a search box that searches every tab at once.",
+        body = "This is a quick tour of the menu's features.\n\nEvery tab on the left groups related features. Click any tab to switch. The search box in each tab filters that tab only.\n\nThe Home tab has a search box that searches every tab at once.",
     },
     {
         title = "Home Tab",
-        body = "Home is your dashboard:\n\n• Live Status shows your role, murderer, sheriff, hero, and distance to murderer.\n• Quick Actions: Apply PVP Ready, Restore, Turn Off All, Panic.\n• Session Stats tracks kills, deaths, rounds, and how many times you were Murderer/Sheriff.\n• FPS/Ping overlay toggle pins a small monitor to your screen.\n• Notification History — click any entry to copy it.",
+        body = "Home is your dashboard:\n\n- Live Status: your role, murderer, sheriff, hero, and distance to murderer.\n- Quick Actions: Apply PVP Ready, Restore, Turn Off All, Panic.\n- Session Stats: kills, deaths, rounds, times as Murderer/Sheriff.\n- FPS/Ping overlay toggle.\n- Notification History (click any entry to copy).",
     },
     {
         title = "PVP Ready & Restore",
-        body = "PVP Ready turns on a curated set of features at once: anti-afk, anti-void, anti-fling, all ESPs, gun ESP, noclip, auto notify, auto kill, killer alarm, and more.\n\nRestore Before PVP reverts everything back to how it was before you clicked PVP Ready. Use it if PVP Ready isn't your vibe.",
+        body = "PVP Ready turns on a curated set of features at once: anti-afk, anti-void, anti-fling, all ESPs, gun ESP, noclip, auto notify, auto kill, killer alarm, and more.\n\nRestore Before PVP reverts everything back to how it was before you clicked PVP Ready.",
     },
     {
         title = "Keybinds & Panic",
-        body = "Open the Keybinds tab to set hotkeys for common actions. Click a key button to rebind it.\n\nThe Panic keybind (default End) silently turns everything off and minimizes the menu — no notification sent.\n\nRight Shift minimizes/restores the menu.",
+        body = "Open the Keybinds tab to set hotkeys for common actions.\n\nThe Panic keybind (default End) silently turns everything off and minimizes the menu - no notification.\n\nRight Shift minimizes/restores the menu.",
     },
     {
         title = "Saved Configs",
-        body = "The Config tab lets you save your current toggle state into one of three slots. Rename them, save, and load them later.\n\nPVP Ready takes a snapshot before applying, so Restore is always available until you load a different config.",
+        body = "The Config tab lets you save your current toggle state into one of three slots. Rename them, save, and load them later.\n\nPVP Ready takes a snapshot before applying, so Restore is always available.",
     },
     {
         title = "Tips",
-        body = "• Hold a sidebar tab for 3 seconds to enter reorder mode.\n• Hover (or long-press on mobile) any toggle for a tooltip.\n• Click a notification to copy its text.\n• Close button asks for confirmation, so you won't close accidentally.\n\nYou can reopen this tutorial any time from the Home tab.",
+        body = "- Hold a sidebar tab for 3 seconds to enter reorder mode.\n- Hover (or long-press on mobile) any toggle for a tooltip.\n- Click a notification to copy its text.\n- Close button asks for confirmation, so you won't close accidentally.\n\nYou can reopen this tutorial any time from the Home tab.",
     },
 }
 
@@ -4616,28 +4563,8 @@ tutNext.MouseButton1Click:Connect(function()
     end
 end)
 
--- Show tutorial once
-task.spawn(function()
-    task.wait(0.5)
-    local hasSeen = false
-    if isfile and readfile then
-        local ok, _ = pcall(function()
-            if isfile("mm2_menu_tutorial_seen.txt") then hasSeen = true end
-        end)
-        if not hasSeen then
-            pcall(function() writefile("mm2_menu_tutorial_seen.txt", "1") end)
-        end
-    else
-        hasSeen = _G.MM2TutorialSeen == true
-        _G.MM2TutorialSeen = true
-    end
-    if not hasSeen then
-        showTutorial()
-    end
-end)
-
 -- ═══════════════════════════════════════════════════════════
--- DRAG / RESIZE / CLOSE
+-- DRAG / RESIZE
 -- ═══════════════════════════════════════════════════════════
 local dragStart, dragStartPosition, resizeStart, resizeStartSize, reopenDragStart, reopenDragStartPosition
 
@@ -4854,7 +4781,7 @@ end
 
 kbActions.panic = function()
     silentResetAll()
-    if minimizeMenu then pcall(minimizeMenu) end
+    minimizeMenu()
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -4922,7 +4849,6 @@ UserInputService.InputEnded:Connect(function(i)
     end
 end)
 
--- Rainbow loop + tab reorder rainbow
 RunService.Heartbeat:Connect(function()
     if S.scriptClosed then return end
     local hue = (tick() * RAINBOW_SPEED) % 1
@@ -4936,7 +4862,6 @@ RunService.Heartbeat:Connect(function()
         U.crosshairV.BackgroundColor3 = color
         U.crosshairDot.BackgroundColor3 = Color3.fromHSV((hue + 0.5) % 1, 1, 1)
     end
-    -- Tab reorder rainbow
     if S.tabReorderState.active and S.tabReorderState.tab then
         local tb = U.tabs[S.tabReorderState.tab]
         if tb then
@@ -4944,13 +4869,11 @@ RunService.Heartbeat:Connect(function()
             if st then st.Color = color end
         end
     end
-    -- Dir indicator color
     if S.dirIndicatorOn and DirUI then
         DirUI.arrow.TextColor3 = color
     end
 end)
 
--- Init
 getRoles()
 updateHL()
 updateGunESP()
@@ -4962,6 +4885,26 @@ task.defer(function()
         pcall(openWhatsNew)
     end
     pcall(updateHomeUI, true)
+end)
+
+-- Show tutorial once
+task.spawn(function()
+    task.wait(0.5)
+    local hasSeen = false
+    if isfile and readfile then
+        local ok, _ = pcall(function()
+            if isfile("mm2_menu_tutorial_seen.txt") then hasSeen = true end
+        end)
+        if not hasSeen then
+            pcall(function() writefile("mm2_menu_tutorial_seen.txt", "1") end)
+        end
+    else
+        hasSeen = _G.MM2TutorialSeen == true
+        _G.MM2TutorialSeen = true
+    end
+    if not hasSeen then
+        showTutorial()
+    end
 end)
 
 task.spawn(function()
