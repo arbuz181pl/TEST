@@ -1,4 +1,4 @@
---// MM2 MENU BY ARBUZ v1.2.6
+--// MM2 MENU BY ARBUZ v1.2.7
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,22 +12,21 @@ local LocalizationService = game:GetService("LocalizationService")
 local RAINBOW_SPEED = 0.25
 local ALARM_TIME_COOLDOWN = 6
 local ALARM_DIST_STEP = 5
-local SPEEDHACK_MAX = 28
-local SPEEDHACK_DEFAULT = 22
+local SPEEDHACK_MAX = 32
+local SPEEDHACK_DEFAULT = 26
 local NO_KNIFE_COOLDOWN = 10
-local SCRIPT_VERSION = "v1.2.6"
+local FLING_RANGE = 6
+local SCRIPT_VERSION = "v1.2.7"
 local SCRIPT_AUTHOR = "Arbuz"
 
 local CHANGELOG = {
-    version = "v1.2.6",
+    version = "v1.2.7",
     date = "2026-10-16",
     changes = {
-        "Fixed menu not opening (Speedhack scope bug)",
-        "Speedhack now uses BodyVelocity (no more Invalid position 267)",
-        "Speedhack capped at 28",
-        "Fling On Touch improved (AssemblyLinearVelocity + spin)",
-        "PVP Ready no longer touches notifications",
-        "Added Disable All Notifications button",
+        "Fling On Touch now flings the TARGET (not yourself)",
+        "Speedhack no longer freezes you while jumping",
+        "Speedhack cap raised to 32 (safe max)",
+        "Speedhack default 26",
     },
 }
 
@@ -89,6 +88,7 @@ local S = {
     selfNotifyMurderer = false, selfNotifySheriff = false,
     roundActive = false, roundActiveSheriff = false, chatSendCooldown = 0, chatSendCooldownSheriff = 0,
     flyPanelOpen = false, flingTouchActive = false, flingTouchThread = nil,
+    flingDebounce = {},
     dropdownOpen = false, selectedPlayer = nil,
     resizing = false, dragging = false, reopenDragging = false, flyDragging = false,
     lastSafePosition = nil, lastSafeUpdate = 0, antiVoidCooldown = false,
@@ -1594,23 +1594,43 @@ U.f3Btn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- ─── IMPROVED FLING ON TOUCH: flings the TARGET ───
 local function flingLoop()
     while S.flingTouchActive do
         RunService.Heartbeat:Wait()
-        local c = player.Character
-        local hrp = c and c:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.new(0, 500, 0)
-            hrp.AssemblyAngularVelocity = Vector3.new(0, 10000, 0)
-            RunService.RenderStepped:Wait()
-            hrp.AssemblyLinearVelocity = Vector3.new(0, -500, 0)
-            hrp.AssemblyAngularVelocity = Vector3.new(0, -10000, 0)
+        local myChar = player.Character
+        local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if myHrp then
+            for _, t in ipairs(Players:GetPlayers()) do
+                if t ~= player and t.Character then
+                    local tHrp = t.Character:FindFirstChild("HumanoidRootPart")
+                    local tHum = t.Character:FindFirstChildOfClass("Humanoid")
+                    if tHrp and tHum and tHum.Health > 0 then
+                        local dist = (myHrp.Position - tHrp.Position).Magnitude
+                        if dist < FLING_RANGE and not S.flingDebounce[t] then
+                            S.flingDebounce[t] = true
+                            -- Take network ownership of the TARGET
+                            pcall(function() tHrp:SetNetworkOwner(player) end)
+                            -- Apply fling velocity to the TARGET
+                            tHrp.AssemblyLinearVelocity = Vector3.new(0, 500, 0)
+                            tHrp.AssemblyAngularVelocity = Vector3.new(0, 10000, 0)
+                            task.wait(0.03)
+                            tHrp.AssemblyLinearVelocity = Vector3.new(0, -500, 0)
+                            tHrp.AssemblyAngularVelocity = Vector3.new(0, -10000, 0)
+                            task.delay(1, function()
+                                S.flingDebounce[t] = nil
+                                pcall(function() tHrp:SetNetworkOwnershipAuto() end)
+                            end)
+                        end
+                    end
+                end
+            end
         end
         task.wait(0.03)
     end
 end
 
-U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch (Improved)")
+U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch (Target)")
 U.fib.MouseButton1Click:Connect(function()
     S.flingOnTouch = not S.flingOnTouch
     if S.flingOnTouch then
@@ -1621,6 +1641,7 @@ U.fib.MouseButton1Click:Connect(function()
     else
         setOff(U.fib, U.fii)
         S.flingTouchActive = false
+        S.flingDebounce = {}
     end
 end)
 
@@ -1729,13 +1750,14 @@ U.shBtn.MouseButton1Click:Connect(function()
     if S.speedhackEnabled then stopSpeedhack() else startSpeedhack() end
 end)
 
+-- Applies speed whether on ground OR in air (no more freeze while jumping)
 RunService.Heartbeat:Connect(function()
     if not S.speedhackEnabled or not S.speedhackBV then return end
     local c = player.Character
     if not c then return end
     local h = c:FindFirstChildOfClass("Humanoid")
     if not h then return end
-    if h.FloorMaterial ~= Enum.Material.Air and h.MoveDirection.Magnitude > 0.05 then
+    if h.MoveDirection.Magnitude > 0.05 then
         S.speedhackBV.Velocity = h.MoveDirection * S.speedhackSpeed
     else
         S.speedhackBV.Velocity = Vector3.zero
@@ -2769,7 +2791,7 @@ resetAllToggles = function()
     FP.panel.Visible = false
     if S.infinityJump then S.infinityJump = false setOff(U.infBtn, U.infInd) end
     if S.flingThirdParty then S.flingThirdParty = false setOff(U.f3Btn, U.f3Ind) end
-    if S.flingOnTouch then S.flingOnTouch = false S.flingTouchActive = false setOff(U.fib, U.fii) end
+    if S.flingOnTouch then S.flingOnTouch = false S.flingTouchActive = false S.flingDebounce = {} setOff(U.fib, U.fii) end
     if S.speedhackEnabled then stopSpeedhack() end
     for r, st in pairs(S.espEnabled) do
         if st then
@@ -3383,7 +3405,7 @@ applyPvpPreset = function()
         setOn(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = true end
     end
-    -- NOTE: Notifications deliberately NOT enabled here.
+    -- Notifications are deliberately NOT enabled here.
     sendNotification("MM2 Menu", "PVP Ready applied")
 end
 
