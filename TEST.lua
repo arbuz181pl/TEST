@@ -31,6 +31,7 @@ local CHANGELOG = {
         "Fling toggles auto-disable Anti Fling",
         "Crosshair now follows mouse and hides default cursor",
         "Fly speed doubles when Shift is held",
+        "Added Self Rainbow ESP",
     },
 }
 
@@ -73,6 +74,7 @@ local S = {
     playerDistanceOn = false, playerDistBillboards = {},
     killerAlarmOn = false, lastAlarmDist = math.huge, lastAlarmTime = 0,
     crosshairOn = false, crosshairGui = nil,
+    selfRainbowESP = false, selfRainbowHL = nil,
     keybindsEnabled = true, scriptClosed = false,
     lastTouchPos = nil, mousePos = nil,
     activeTouches = {},
@@ -171,6 +173,8 @@ local showCloseConfirm
 local updateHomeUI
 local stopSpeedhack
 local startSpeedhack
+local ensureSelfRainbowHL
+local disableSelfRainbowESP
 
 local function playSound(id, baseVol, isKill)
     baseVol = baseVol or 1
@@ -1560,13 +1564,13 @@ RunService.RenderStepped:Connect(function()
     end
     if UserInputService:IsKeyDown(Enum.KeyCode.Space) or flyUpFlag == 1 then dir = dir + Vector3.new(0, 1, 0) end
     if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or flyDownFlag == -1 then dir = dir - Vector3.new(0, 1, 0) end
-    
+
     -- FLY SPEED BOOST: Double speed when Shift is held
     local speed = S.flySpeed
     if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
         speed = speed * 2
     end
-    
+
     if dir.Magnitude > 0 then flyBV.Velocity = dir.Unit * speed else flyBV.Velocity = Vector3.zero end
     flyBG.CFrame = cam.CFrame
 end)
@@ -1806,6 +1810,54 @@ U.gunBtn.MouseButton1Click:Connect(function()
             if hl then pcall(function() hl:Destroy() end) end
         end
         S.gunHighlights = {}
+    end
+end)
+
+createSectionTitle("SELF ESP")
+
+U.selfRainbowBtn, U.selfRainbowInd = createToggle("SelfRainbowESP", "Self Rainbow ESP")
+
+ensureSelfRainbowHL = function()
+    local c = player.Character
+    if not c then return nil end
+    local existingHL = c:FindFirstChild("SelfRainbowESP")
+    if existingHL then
+        S.selfRainbowHL = existingHL
+        return existingHL
+    end
+    local hl = Instance.new("Highlight")
+    hl.Name = "SelfRainbowESP"
+    hl.FillTransparency = 0.5
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Adornee = c
+    hl.Parent = c
+    S.selfRainbowHL = hl
+    return hl
+end
+
+disableSelfRainbowESP = function()
+    S.selfRainbowESP = false
+    if S.selfRainbowHL then
+        pcall(function() S.selfRainbowHL:Destroy() end)
+        S.selfRainbowHL = nil
+    end
+    if player.Character then
+        local leftover = player.Character:FindFirstChild("SelfRainbowESP")
+        if leftover then leftover:Destroy() end
+    end
+    pcall(setOff, U.selfRainbowBtn, U.selfRainbowInd)
+end
+
+U.selfRainbowBtn.MouseButton1Click:Connect(function()
+    if S.selfRainbowESP then
+        disableSelfRainbowESP()
+        sendNotification("MM2 Menu", "Self Rainbow ESP: OFF")
+    else
+        S.selfRainbowESP = true
+        setOn(U.selfRainbowBtn, U.selfRainbowInd)
+        ensureSelfRainbowHL()
+        sendNotification("MM2 Menu", "Self Rainbow ESP: ON")
     end
 end)
 
@@ -2810,6 +2862,9 @@ resetAllToggles = function()
         setOff(U.gunBtn, U.gunInd)
         for g, hl in pairs(S.gunHighlights) do if hl then pcall(function() hl:Destroy() end) end end
         S.gunHighlights = {}
+    end
+    if S.selfRainbowESP then
+        if disableSelfRainbowESP then pcall(disableSelfRainbowESP) end
     end
     if S.playerDistanceOn then
         S.playerDistanceOn = false
@@ -3854,6 +3909,23 @@ local function updateGunESP()
     end
 end
 
+-- ─── SELF RAINBOW ESP LOOP ───
+RunService.Heartbeat:Connect(function()
+    if S.scriptClosed then return end
+    if not S.selfRainbowESP then return end
+    -- Re-attach if missing (e.g. after respawn)
+    if not S.selfRainbowHL or not S.selfRainbowHL.Parent then
+        ensureSelfRainbowHL()
+    end
+    if not S.selfRainbowHL then return end
+    local hue = (tick() * 0.5) % 1
+    local c = Color3.fromHSV(hue, 1, 1)
+    S.selfRainbowHL.FillColor = c
+    S.selfRainbowHL.OutlineColor = c
+    S.selfRainbowHL.FillTransparency = 0.5
+    S.selfRainbowHL.OutlineTransparency = 0
+end)
+
 local function checkAutoChat()
     if S.autoSendMurdererChat then
         if not MurdererName then
@@ -4092,6 +4164,10 @@ player.CharacterAdded:Connect(function(character)
     end
     hookPlayerDeath(character)
     updateHL()
+    if S.selfRainbowESP then
+        task.wait(0.1)
+        ensureSelfRainbowHL()
+    end
     if keepSpeedhack and S.speedhackEnabled then
         task.defer(function()
             task.wait(0.15)
@@ -4194,6 +4270,10 @@ local function closeScript()
     pcall(resetAllToggles)
     pcall(stopFly)
     pcall(stopSpeedhack)
+    pcall(function()
+        if S.selfRainbowHL then S.selfRainbowHL:Destroy() end
+        S.selfRainbowHL = nil
+    end)
     pcall(function()
         for g, hl in pairs(S.gunHighlights) do if hl then hl:Destroy() end end
     end)
