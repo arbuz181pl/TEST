@@ -15,7 +15,6 @@ local ALARM_DIST_STEP = 5
 local SPEEDHACK_MAX = 32
 local SPEEDHACK_DEFAULT = 26
 local NO_KNIFE_COOLDOWN = 10
-local FLING_RANGE = 6
 local SCRIPT_VERSION = "v1.2.7"
 local SCRIPT_AUTHOR = "Arbuz"
 
@@ -62,7 +61,7 @@ local function fmtAgo(t)
 end
 
 local S = {
-    noclip = false, infinityJump = false, flingOnTouch = false, flingThirdParty = false,
+    noclip = false, infinityJump = false, flingThirdParty = false,
     flyEnabled = false, autoNotifyRoles = false, autoKillAll = false, autoGunTP = false,
     autoSendMurdererChat = false, autoSendSheriffChat = false, antiVoidEnabled = false,
     antiFlingEnabled = false, antiAfkEnabled = false, antiAfkConn = nil,
@@ -87,8 +86,7 @@ local S = {
     lastChatSentMurderer = nil, lastChatSentSheriff = nil,
     selfNotifyMurderer = false, selfNotifySheriff = false,
     roundActive = false, roundActiveSheriff = false, chatSendCooldown = 0, chatSendCooldownSheriff = 0,
-    flyPanelOpen = false, flingTouchActive = false, flingTouchThread = nil,
-    flingDebounce = {},
+    flyPanelOpen = false,
     dropdownOpen = false, selectedPlayer = nil,
     resizing = false, dragging = false, reopenDragging = false, flyDragging = false,
     lastSafePosition = nil, lastSafeUpdate = 0, antiVoidCooldown = false,
@@ -1594,57 +1592,6 @@ U.f3Btn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ─── IMPROVED FLING ON TOUCH: flings the TARGET ───
-local function flingLoop()
-    while S.flingTouchActive do
-        RunService.Heartbeat:Wait()
-        local myChar = player.Character
-        local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if myHrp then
-            for _, t in ipairs(Players:GetPlayers()) do
-                if t ~= player and t.Character then
-                    local tHrp = t.Character:FindFirstChild("HumanoidRootPart")
-                    local tHum = t.Character:FindFirstChildOfClass("Humanoid")
-                    if tHrp and tHum and tHum.Health > 0 then
-                        local dist = (myHrp.Position - tHrp.Position).Magnitude
-                        if dist < FLING_RANGE and not S.flingDebounce[t] then
-                            S.flingDebounce[t] = true
-                            -- Take network ownership of the TARGET
-                            pcall(function() tHrp:SetNetworkOwner(player) end)
-                            -- Apply fling velocity to the TARGET
-                            tHrp.AssemblyLinearVelocity = Vector3.new(0, 500, 0)
-                            tHrp.AssemblyAngularVelocity = Vector3.new(0, 10000, 0)
-                            task.wait(0.03)
-                            tHrp.AssemblyLinearVelocity = Vector3.new(0, -500, 0)
-                            tHrp.AssemblyAngularVelocity = Vector3.new(0, -10000, 0)
-                            task.delay(1, function()
-                                S.flingDebounce[t] = nil
-                                pcall(function() tHrp:SetNetworkOwnershipAuto() end)
-                            end)
-                        end
-                    end
-                end
-            end
-        end
-        task.wait(0.03)
-    end
-end
-
-U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch (Target)")
-U.fib.MouseButton1Click:Connect(function()
-    S.flingOnTouch = not S.flingOnTouch
-    if S.flingOnTouch then
-        U.fib.BackgroundColor3 = Color3.fromRGB(70, 45, 35)
-        U.fii.BackgroundColor3 = Color3.fromRGB(230, 100, 55)
-        S.flingTouchActive = true
-        task.spawn(flingLoop)
-    else
-        setOff(U.fib, U.fii)
-        S.flingTouchActive = false
-        S.flingDebounce = {}
-    end
-end)
-
 createSectionTitle("SPEEDHACK")
 
 U.shBtn, U.shInd = createToggle("Speedhack", "Speedhack (Safe)")
@@ -2791,7 +2738,6 @@ resetAllToggles = function()
     FP.panel.Visible = false
     if S.infinityJump then S.infinityJump = false setOff(U.infBtn, U.infInd) end
     if S.flingThirdParty then S.flingThirdParty = false setOff(U.f3Btn, U.f3Ind) end
-    if S.flingOnTouch then S.flingOnTouch = false S.flingTouchActive = false S.flingDebounce = {} setOff(U.fib, U.fii) end
     if S.speedhackEnabled then stopSpeedhack() end
     for r, st in pairs(S.espEnabled) do
         if st then
@@ -4056,7 +4002,15 @@ player.CharacterAdded:Connect(function(character)
     S.originalCollision = {}
     S.lastSafePosition = nil
     S.antiVoidCooldown = false
-    if S.speedhackEnabled then stopSpeedhack() end
+    -- FIX: keep Speedhack ON through round end / respawn.
+    -- Old code called stopSpeedhack() here, which flipped S.speedhackEnabled = false,
+    -- so the toggle turned itself off whenever the character respawned.
+    -- Now we just drop the stale BodyVelocity and reattach it to the new character.
+    local keepSpeedhack = S.speedhackEnabled
+    if S.speedhackBV then
+        pcall(function() S.speedhackBV:Destroy() end)
+        S.speedhackBV = nil
+    end
     if S.noclip then
         task.wait(0.1)
         for _, o in ipairs(character:GetDescendants()) do
@@ -4073,6 +4027,25 @@ player.CharacterAdded:Connect(function(character)
     end
     hookPlayerDeath(character)
     updateHL()
+    if keepSpeedhack and S.speedhackEnabled then
+        task.defer(function()
+            task.wait(0.15)
+            if not S.speedhackEnabled then return end
+            local c = player.Character
+            if not c then return end
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            local root = c:FindFirstChild("HumanoidRootPart")
+            if not hum or not root then return end
+            local bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(10000, 0, 10000)
+            bv.P = 500
+            bv.Velocity = Vector3.zero
+            bv.Parent = root
+            S.speedhackBV = bv
+            hum.WalkSpeed = 16
+            pcall(setOn, U.shBtn, U.shInd)
+        end)
+    end
 end)
 
 -- ============================================================
