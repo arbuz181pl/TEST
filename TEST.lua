@@ -1,4 +1,4 @@
---// MM2 MENU BY ARBUZ v1.2.3
+--// MM2 MENU BY ARBUZ v1.2.4
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,22 +12,20 @@ local LocalizationService = game:GetService("LocalizationService")
 local RAINBOW_SPEED = 0.25
 local ALARM_TIME_COOLDOWN = 6
 local ALARM_DIST_STEP = 5
-local SCRIPT_VERSION = "v1.2.3"
+local SPEEDHACK_MAX = 40
+local SPEEDHACK_DEFAULT = 35
+local NO_KNIFE_COOLDOWN = 10
+local SCRIPT_VERSION = "v1.2.4"
 local SCRIPT_AUTHOR = "Arbuz"
 
 local CHANGELOG = {
-    version = "v1.2.3",
+    version = "v1.2.4",
     date = "2026-10-16",
     changes = {
-        "Added auto re-announce roles every 30s (Notifier)",
-        "Added hero change detector (Notifier)",
-        "Added auto-hide UI when round starts (Notifier)",
-        "Added distance to murderer on Home status",
-        "Added silent panic keybind (default End)",
-        "Added close script confirmation",
-        "Added click-to-copy on notification history",
-        "Added 3 saved config slots (Config tab)",
-        "All Tier 1 features - zero camera/metamethod interference",
+        "Fixed fly panel click-through to menu behind it",
+        "Fixed Invalid position kick - speedhack capped at 40 (default 35)",
+        "No-knife notification now 10s cooldown (was spamming)",
+        "All other features preserved",
     },
 }
 
@@ -80,7 +78,7 @@ local S = {
     killerTrailOn = false, sheriffTrailOn = false, heroTrailOn = false,
     cameraFollowMurderer = false, killSoundOn = false,
     lastKnownMurderer = nil,
-    flySpeed = 50, speedhackEnabled = false, speedhackSpeed = 45,
+    flySpeed = 50, speedhackEnabled = false, speedhackSpeed = SPEEDHACK_DEFAULT,
     guiLocked = false, flyPanelLocked = false, minimized = false, menuVisible = true,
     espEnabled = { Innocent = false, Murderer = false, Sheriff = false, Hero = false },
     gunESPEnabled = false, gunHighlights = {}, originalCollision = {},
@@ -101,7 +99,6 @@ local S = {
     stats = { kills = 0, deaths = 0, rounds = 0, asMurderer = 0, asSheriff = 0 },
     statsCountedMurderer = false, statsCountedSheriff = false,
     whatsNewAutoShown = false, homeRebuildDirty = true,
-    -- ─── Tier 1 additions ───
     reAnnounceEnabled = false,
     reAnnounceInterval = 30,
     lastReAnnounceTime = 0,
@@ -110,6 +107,7 @@ local S = {
     autoHideInRound = false,
     savedConfigs = {},
     silentMode = false,
+    lastNoKnifeNotify = 0,
     keybinds = {
         fly = Enum.KeyCode.LeftAlt, noclip = Enum.KeyCode.N, speedhack = Enum.KeyCode.Q,
         infinityJump = Enum.KeyCode.J, autoKillAll = Enum.KeyCode.K, gunESP = Enum.KeyCode.G,
@@ -751,7 +749,7 @@ U.whatsNewOverlay.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- CLOSE CONFIRMATION MODAL (Tier 1)
+-- CLOSE CONFIRMATION MODAL
 -- ============================================================
 U.closeConfirm = Instance.new("TextButton")
 U.closeConfirm.Name = "CloseConfirmOverlay"
@@ -854,7 +852,6 @@ U.whatsNewBtn.MouseButton1Click:Connect(function()
     openWhatsNew()
 end)
 
--- Cross-tab search on Home
 createSectionTitle("SEARCH ALL TABS")
 
 local homeSearchBox = Instance.new("TextBox")
@@ -1177,15 +1174,9 @@ local function rebuildNotifHistory()
         frame.MouseButton1Click:Connect(function()
             local ok = pcall(function() setclipboard(notifTitle .. "\n" .. notifText) end)
             if ok then
-                local oldSilent = S.silentMode
-                S.silentMode = false
-                -- temporarily allow toast
-                if StarterGui then
-                    pcall(function()
-                        StarterGui:SetCore("SendNotification", {Title = "MM2 Menu", Text = "Copied notification", Duration = 2})
-                    end)
-                end
-                S.silentMode = oldSilent
+                pcall(function()
+                    StarterGui:SetCore("SendNotification", {Title = "MM2 Menu", Text = "Copied notification", Duration = 2})
+                end)
             end
         end)
     end
@@ -1213,7 +1204,6 @@ updateHomeUI = function(rebuildLists)
     local maxP = Players.MaxPlayers or 0
     U.homeRefs.playersLbl.Text = tostring(total) .. " / " .. tostring(maxP)
 
-    -- Distance to murderer
     if MurdererName and MurdererName ~= player.Name then
         local me = player.Character
         local m = Players:FindFirstChild(MurdererName)
@@ -1293,6 +1283,7 @@ FP.panel.Position = UDim2.new(0.5, mn(150), 0.5, -mn(110))
 FP.panel.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
 FP.panel.BorderSizePixel = 0
 FP.panel.Visible = false
+FP.panel.Active = true
 FP.panel.ZIndex = 20
 FP.panel.Parent = U.gui
 do
@@ -1659,7 +1650,7 @@ U.shBox.Size = msz(50, 30)
 U.shBox.Position = mpos(40, 0)
 U.shBox.BackgroundColor3 = Color3.fromRGB(34, 36, 43)
 U.shBox.BorderSizePixel = 0
-U.shBox.Text = "45"
+U.shBox.Text = tostring(SPEEDHACK_DEFAULT)
 U.shBox.TextColor3 = Color3.fromRGB(235, 235, 240)
 U.shBox.TextSize = mn(12)
 U.shBox.Font = Enum.Font.GothamSemibold
@@ -1684,7 +1675,7 @@ U.shLbl = Instance.new("TextLabel")
 U.shLbl.Size = UDim2.new(1, -mn(138), 0, mn(30))
 U.shLbl.Position = mpos(138, 0)
 U.shLbl.BackgroundTransparency = 1
-U.shLbl.Text = "WalkSpeed"
+U.shLbl.Text = "WalkSpeed (max " .. SPEEDHACK_MAX .. ")"
 U.shLbl.TextColor3 = Color3.fromRGB(150, 153, 165)
 U.shLbl.TextSize = mn(11)
 U.shLbl.Font = Enum.Font.GothamBold
@@ -1693,12 +1684,14 @@ U.shLbl.Parent = U.shRow
 
 local function updateSH(v)
     v = tonumber(v) or S.speedhackSpeed
-    v = math.clamp(math.floor(v), 1, 100)
+    v = math.clamp(math.floor(v), 1, SPEEDHACK_MAX)
     S.speedhackSpeed = v
     U.shBox.Text = tostring(v)
+    local h = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if h and S.speedhackEnabled then h.WalkSpeed = v end
 end
-U.shMinus.MouseButton1Click:Connect(function() updateSH(S.speedhackSpeed - 5) end)
-U.shPlus.MouseButton1Click:Connect(function() updateSH(S.speedhackSpeed + 5) end)
+U.shMinus.MouseButton1Click:Connect(function() updateSH(S.speedhackSpeed - 2) end)
+U.shPlus.MouseButton1Click:Connect(function() updateSH(S.speedhackSpeed + 2) end)
 U.shBox.FocusLost:Connect(function() updateSH(U.shBox.Text) end)
 
 U.shBtn.MouseButton1Click:Connect(function()
@@ -1813,7 +1806,6 @@ U.autoNotBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ─── Tier 1: Re-announce every 30s ───
 U.reAnnBtn, U.reAnnInd = createToggle("ReAnnounce", "Re-announce Roles Every 30s")
 U.reAnnBtn.MouseButton1Click:Connect(function()
     S.reAnnounceEnabled = not S.reAnnounceEnabled
@@ -1825,7 +1817,6 @@ U.reAnnBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ─── Tier 1: Hero change notify ───
 U.heroChangeBtn, U.heroChangeInd = createToggle("HeroChangeNotify", "Notify When Hero Changes")
 U.heroChangeBtn.MouseButton1Click:Connect(function()
     S.heroChangeNotify = not S.heroChangeNotify
@@ -1852,7 +1843,6 @@ U.plBtn.MouseButton1Click:Connect(function()
     if S.playerJoinLeaveNotify then setOn(U.plBtn, U.plInd) else setOff(U.plBtn, U.plInd) end
 end)
 
--- ─── Tier 1: Auto-hide in round ───
 U.autoHideBtn, U.autoHideInd = createToggle("AutoHideInRound", "Auto-hide UI When Round Starts")
 U.autoHideBtn.MouseButton1Click:Connect(function()
     S.autoHideInRound = not S.autoHideInRound
@@ -1975,7 +1965,13 @@ local function killAllPlayers()
     local mr = c:FindFirstChild("HumanoidRootPart")
     if not mr then return end
     local k = getKnife()
-    if not k then sendNotification("MM2 Menu", "No knife equipped!", SOUNDS.alert) return end
+    if not k then
+        if tick() - (S.lastNoKnifeNotify or 0) > NO_KNIFE_COOLDOWN then
+            S.lastNoKnifeNotify = tick()
+            sendNotification("MM2 Menu", "No knife equipped!", SOUNDS.alert)
+        end
+        return
+    end
 
     local function getTargets()
         local list = {}
@@ -2871,7 +2867,6 @@ U.allNotifyBtn.MouseButton1Click:Connect(function()
     sendNotification("MM2 Menu", "All notifications enabled")
 end)
 
--- ─── Tier 1: Saved Configs ───
 createSectionTitle("SAVED CONFIGS (3 slots)")
 
 local function snapshotSettings()
@@ -3395,6 +3390,7 @@ local function roundEvents()
         S.stats.rounds = S.stats.rounds + 1
         S.statsCountedMurderer = false
         S.statsCountedSheriff = false
+        S.lastNoKnifeNotify = 0
         if S.autoHideInRound then
             if minimizeMenu then pcall(minimizeMenu) end
         end
@@ -3468,7 +3464,6 @@ local function getRoles()
         S.roundActiveSheriff = false
     end
     if nH and validHolder(nH) then
-        -- Tier 1: hero change detect
         if S.heroChangeNotify and S.lastHero and S.lastHero ~= nH then
             sendNotification("New Hero", "Hero changed: " .. tostring(nH))
         end
@@ -3520,7 +3515,6 @@ local function getRoles()
         end
     end
 
-    -- Tier 1: re-announce every 30s
     if S.reAnnounceEnabled and MurdererName then
         local now = tick()
         if now - (S.lastReAnnounceTime or 0) >= (S.reAnnounceInterval or 30) then
@@ -4225,7 +4219,6 @@ kbActions.turnOffAll = function()
     if resetAllToggles then resetAllToggles() end
 end
 
--- Tier 1: silent panic
 kbActions.panic = function()
     S.silentMode = true
     if resetAllToggles then pcall(resetAllToggles) end
