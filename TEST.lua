@@ -22,10 +22,12 @@ local CHANGELOG = {
     version = "v1.2.7",
     date = "2026-10-16",
     changes = {
-        "Fling On Touch now flings the TARGET (not yourself)",
+        "Fling On Touch re-added",
         "Speedhack no longer freezes you while jumping",
         "Speedhack cap raised to 32 (safe max)",
         "Speedhack default 26",
+        "Speedhack now survives round end / respawn",
+        "Gun Drop Alert & Killer Alarm included in PVP Ready",
     },
 }
 
@@ -61,7 +63,7 @@ local function fmtAgo(t)
 end
 
 local S = {
-    noclip = false, infinityJump = false, flingThirdParty = false,
+    noclip = false, infinityJump = false, flingOnTouch = false, flingThirdParty = false,
     flyEnabled = false, autoNotifyRoles = false, autoKillAll = false, autoGunTP = false,
     autoSendMurdererChat = false, autoSendSheriffChat = false, antiVoidEnabled = false,
     antiFlingEnabled = false, antiAfkEnabled = false, antiAfkConn = nil,
@@ -86,7 +88,7 @@ local S = {
     lastChatSentMurderer = nil, lastChatSentSheriff = nil,
     selfNotifyMurderer = false, selfNotifySheriff = false,
     roundActive = false, roundActiveSheriff = false, chatSendCooldown = 0, chatSendCooldownSheriff = 0,
-    flyPanelOpen = false,
+    flyPanelOpen = false, flingTouchActive = false, flingTouchThread = nil,
     dropdownOpen = false, selectedPlayer = nil,
     resizing = false, dragging = false, reopenDragging = false, flyDragging = false,
     lastSafePosition = nil, lastSafeUpdate = 0, antiVoidCooldown = false,
@@ -1592,6 +1594,41 @@ U.f3Btn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- ─── FLING ON TOUCH (from v1.2) ───
+local function flingLoop()
+    local lp = player
+    local c, hrp, vel, movel = nil, nil, nil, 0.1
+    while S.flingTouchActive do
+        RunService.Heartbeat:Wait()
+        c = lp.Character
+        hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            vel = hrp.Velocity
+            hrp.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = vel
+            RunService.Stepped:Wait()
+            hrp.Velocity = vel + Vector3.new(0, movel, 0)
+            movel = -movel
+        end
+    end
+end
+
+U.fib, U.fii = createToggle("FlingOnTouchIntegrated", "Fling On Touch")
+U.fib.MouseButton1Click:Connect(function()
+    S.flingOnTouch = not S.flingOnTouch
+    if S.flingOnTouch then
+        U.fib.BackgroundColor3 = Color3.fromRGB(70, 45, 35)
+        U.fii.BackgroundColor3 = Color3.fromRGB(230, 100, 55)
+        S.flingTouchActive = true
+        S.flingTouchThread = coroutine.create(flingLoop)
+        coroutine.resume(S.flingTouchThread)
+    else
+        setOff(U.fib, U.fii)
+        S.flingTouchActive = false
+    end
+end)
+
 createSectionTitle("SPEEDHACK")
 
 U.shBtn, U.shInd = createToggle("Speedhack", "Speedhack (Safe)")
@@ -2738,6 +2775,7 @@ resetAllToggles = function()
     FP.panel.Visible = false
     if S.infinityJump then S.infinityJump = false setOff(U.infBtn, U.infInd) end
     if S.flingThirdParty then S.flingThirdParty = false setOff(U.f3Btn, U.f3Ind) end
+    if S.flingOnTouch then S.flingOnTouch = false S.flingTouchActive = false setOff(U.fib, U.fii) end
     if S.speedhackEnabled then stopSpeedhack() end
     for r, st in pairs(S.espEnabled) do
         if st then
@@ -3131,9 +3169,9 @@ for i = 1, 3 do buildConfigSlot(i) end
 
 createSectionTitle("PRESET INFO")
 local pInfo = Instance.new("TextLabel")
-pInfo.Size = UDim2.new(1, 0, 0, mn(200))
+pInfo.Size = UDim2.new(1, 0, 0, mn(220))
 pInfo.BackgroundTransparency = 1
-pInfo.Text = "PVP Ready (Home tab) turns ON:\n- Anti AFK, Anti Void, Anti Fling\n- All 4 ESPs + Gun ESP\n- Noclip\n- Auto Kill All\n- Killer Alarm (30 studs)\n- Rainbow Crosshair (PC only)\n\nNOT included in PVP Ready:\n- Any notification (see above)\n- Speedhack, Fly, Noclip settings\n\nRestore (Home tab) reverts to\nsettings from before PVP Ready."
+pInfo.Text = "PVP Ready (Home tab) turns ON:\n- Anti AFK, Anti Void, Anti Fling\n- All 4 ESPs + Gun ESP\n- Noclip\n- Auto Kill All\n- Killer Alarm (30 studs)\n- Gun Drop Alert\n- Rainbow Crosshair (PC only)\n\nNOT included in PVP Ready:\n- Speedhack, Fly, Fling\n- Round Start / End notifications"
 pInfo.TextColor3 = Color3.fromRGB(180, 182, 190)
 pInfo.TextSize = mn(11)
 pInfo.Font = Enum.Font.Gotham
@@ -3346,12 +3384,16 @@ applyPvpPreset = function()
         S.lastAlarmTime = 0
         setOn(U.killerAlarmBtn, U.killerAlarmInd)
     end
+    if not S.gunDropAlert then
+        S.gunDropAlert = true
+        setOn(U.gunAlertBtn, U.gunAlertInd)
+    end
     if not IS_MOBILE and not S.crosshairOn then
         S.crosshairOn = true
         setOn(U.crosshairBtn, U.crosshairInd)
         if S.crosshairGui then S.crosshairGui.Enabled = true end
     end
-    -- Notifications are deliberately NOT enabled here.
+    -- Notifications like Round Start/End are deliberately NOT enabled here.
     sendNotification("MM2 Menu", "PVP Ready applied")
 end
 
@@ -4003,9 +4045,6 @@ player.CharacterAdded:Connect(function(character)
     S.lastSafePosition = nil
     S.antiVoidCooldown = false
     -- FIX: keep Speedhack ON through round end / respawn.
-    -- Old code called stopSpeedhack() here, which flipped S.speedhackEnabled = false,
-    -- so the toggle turned itself off whenever the character respawned.
-    -- Now we just drop the stale BodyVelocity and reattach it to the new character.
     local keepSpeedhack = S.speedhackEnabled
     if S.speedhackBV then
         pcall(function() S.speedhackBV:Destroy() end)
