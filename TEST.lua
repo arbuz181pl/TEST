@@ -28,6 +28,7 @@ local CHANGELOG = {
         "Speedhack default 26",
         "Speedhack now survives round end / respawn",
         "Gun Drop Alert & Killer Alarm included in PVP Ready",
+        "Fling toggles auto-disable Anti Fling",
     },
 }
 
@@ -1585,6 +1586,11 @@ U.f3Btn.MouseButton1Click:Connect(function()
     if S.flingThirdParty then
         U.f3Btn.BackgroundColor3 = Color3.fromRGB(70, 45, 35)
         U.f3Ind.BackgroundColor3 = Color3.fromRGB(230, 100, 55)
+        if S.antiFlingEnabled then
+            S.antiFlingEnabled = false
+            setOff(U.afBtn, U.afInd)
+            sendNotification("MM2 Menu", "Anti Fling disabled - it blocks Fling On Touch / 3rd party fling", SOUNDS.alert)
+        end
         local ok = pcall(function()
             loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Ultimate-Fling-GUI-41909"))()
         end)
@@ -1620,6 +1626,11 @@ U.fib.MouseButton1Click:Connect(function()
     if S.flingOnTouch then
         U.fib.BackgroundColor3 = Color3.fromRGB(70, 45, 35)
         U.fii.BackgroundColor3 = Color3.fromRGB(230, 100, 55)
+        if S.antiFlingEnabled then
+            S.antiFlingEnabled = false
+            setOff(U.afBtn, U.afInd)
+            sendNotification("MM2 Menu", "Anti Fling disabled - it blocks Fling On Touch / 3rd party fling", SOUNDS.alert)
+        end
         S.flingTouchActive = true
         S.flingTouchThread = coroutine.create(flingLoop)
         coroutine.resume(S.flingTouchThread)
